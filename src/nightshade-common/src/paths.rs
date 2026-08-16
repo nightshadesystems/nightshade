@@ -152,6 +152,14 @@ impl Paths {
     pub fn networkd_dir(&self) -> PathBuf {
         self.at("run/systemd/network")
     }
+
+    // -- the kernel ---------------------------------------------------------
+
+    /// What the kernel says it has. Read-only, and read by configd rather than
+    /// by any client, so there is one answer to what an interface looks like.
+    pub fn sys_class_net(&self) -> PathBuf {
+        self.at("sys/class/net")
+    }
 }
 
 #[cfg(test)]

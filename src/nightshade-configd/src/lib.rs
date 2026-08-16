@@ -73,6 +73,7 @@ pub mod archive;
 pub mod commit;
 pub mod confirm;
 pub mod logging;
+pub mod netif;
 pub mod peer;
 pub mod server;
 pub mod session;

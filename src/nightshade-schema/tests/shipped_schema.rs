@@ -660,6 +660,47 @@ fn children_of_drives_completion_at_every_position() {
 }
 
 #[test]
+fn a_typed_line_splits_into_a_path_and_a_value() {
+    let schema = schema();
+    let split = |typed: &str| {
+        let (path, value) = schema.split_value(&p(typed));
+        (path.to_string(), value)
+    };
+
+    assert_eq!(
+        split("interfaces ethernet eth0 mtu 9000"),
+        ("interfaces ethernet eth0 mtu".into(), Some("9000".into()))
+    );
+    assert_eq!(
+        split("system name-server 1.1.1.1"),
+        ("system name-server".into(), Some("1.1.1.1".into()))
+    );
+    // A value that looks like a path segment is still a value.
+    assert_eq!(
+        split("interfaces vlan vlan100 parent eth0"),
+        ("interfaces vlan vlan100 parent".into(), Some("eth0".into()))
+    );
+
+    // Nothing to split: a flag, a bare tag instance, a container.
+    assert_eq!(
+        split("interfaces ethernet eth0 disable"),
+        ("interfaces ethernet eth0 disable".into(), None)
+    );
+    assert_eq!(
+        split("interfaces ethernet eth0"),
+        ("interfaces ethernet eth0".into(), None)
+    );
+    assert_eq!(split("system"), ("system".into(), None));
+
+    // An unknown path comes back whole, so the complaint is about the path
+    // rather than about a value invented from it.
+    assert_eq!(
+        split("system hostname fw"),
+        ("system hostname fw".into(), None)
+    );
+}
+
+#[test]
 fn the_renderer_knows_which_nodes_are_tag_nodes() {
     let schema = schema();
     for tag in ["ethernet", "loopback", "vlan", "bonding", "bridge", "vxlan"] {

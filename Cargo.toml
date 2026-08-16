@@ -25,6 +25,10 @@ nightshade-common = { path = "src/nightshade-common" }
 nightshade-proto = { path = "src/nightshade-proto" }
 nightshade-schema = { path = "src/nightshade-schema" }
 nightshade-render = { path = "src/nightshade-render" }
+# A dev-dependency of the CLI only: its tests run a real configd on a real
+# socket, because a client tested against a mock of its own server is a client
+# tested against its author's idea of the protocol.
+nightshade-configd = { path = "src/nightshade-configd" }
 
 # configd only. The CLI is synchronous -- a line editor waiting on a human has
 # nothing to overlap -- and pulling tokio into it would double the binary that

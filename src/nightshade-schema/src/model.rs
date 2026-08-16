@@ -284,6 +284,47 @@ impl Schema {
         matches!(self.resolve(path), Some(Location::Node(node)) if node.is_tag())
     }
 
+    /// Split a typed line into the node it names and the value it gives.
+    ///
+    /// `set interfaces ethernet eth0 mtu 9000` is a path of five segments and
+    /// a value, and only the schema knows where the boundary is -- `9000`
+    /// could as easily have been another path segment. The CLI needs this to
+    /// build a `Set`, and it is metadata rather than judgement: configd
+    /// re-derives and re-validates both halves regardless.
+    ///
+    /// Unknown paths come back whole with no value, so the error an operator
+    /// sees is about the path they typed rather than about a value that was
+    /// invented for them.
+    pub fn split_value(&self, typed: &Path) -> (Path, Option<String>) {
+        let mut location = Location::Node(&self.root);
+        for (i, segment) in typed.segments().iter().enumerate() {
+            location = match location {
+                Location::Node(node) => match &node.kind {
+                    NodeKind::Container => match node.children.get(segment) {
+                        Some(child) => Location::Node(child),
+                        None => return (typed.clone(), None),
+                    },
+                    NodeKind::Tag(_) => Location::Instance(node),
+                    // A value goes here, and everything after it is not part
+                    // of the path.
+                    NodeKind::Leaf(_) | NodeKind::MultiLeaf(_) => {
+                        return (
+                            Path::from_segments(&typed.segments()[..i]),
+                            Some(segment.clone()),
+                        );
+                    }
+                    NodeKind::Flag => return (typed.clone(), None),
+                },
+                Location::Instance(tag) => match tag.children.get(segment) {
+                    Some(child) => Location::Node(child),
+                    None => return (typed.clone(), None),
+                },
+                Location::Value(_) => return (typed.clone(), None),
+            };
+        }
+        (typed.clone(), None)
+    }
+
     /// The schema-declared default at a path, if it has one.
     pub fn default_for(&self, path: &Path) -> Option<&str> {
         match self.resolve(path)? {

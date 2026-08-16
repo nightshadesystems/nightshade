@@ -7,8 +7,32 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-# The `ns` binary target (with a `nightshade` symlink alongside it) arrives
-# with the CLI itself. Declaring it now would mean shipping a login shell that
-# does nothing, and this is the one binary in the workspace that gets set as
-# somebody's login shell.
+# `ns` is what an operator types and what their login shell is. The
+# `nightshade` symlink is made by packaging rather than by a second binary.
+[lib]
+name = "nightshade_cli"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ns"
+path = "src/main.rs"
+
 [dependencies]
+nightshade-common = { workspace = true }
+nightshade-proto = { workspace = true }
+# For completion and `?` help only. The CLI reads the schema for metadata and
+# never for judgement: no `validate_set`, no constraints, no defaults applied
+# behind configd's back.
+nightshade-schema = { workspace = true }
+
+nix = { workspace = true, features = ["user"] }
+reedline = { workspace = true }
+regex = { workspace = true }
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+nightshade-configd = { workspace = true }
+nightshade-render = { workspace = true }
+tokio = { workspace = true, features = ["rt", "net", "sync", "time", "macros"] }

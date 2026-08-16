@@ -48,3 +48,10 @@
 //! audited. `exit` or `operational` returns to the same `ns` process with its
 //! history and mode intact. It is not available from configuration mode; leave
 //! the candidate config first.
+
+pub mod client;
+pub mod complete;
+pub mod output;
+pub mod pipe;
+pub mod repl;
+pub mod shell;

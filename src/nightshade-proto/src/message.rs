@@ -86,6 +86,51 @@ pub enum Request {
 
     /// The archive, newest first.
     CommitLog,
+
+    /// Live state, rather than configuration.
+    OpShow { target: OpTarget },
+
+    /// Ask to drop to a shell, and have it recorded.
+    ///
+    /// The CLI asks rather than deciding, so that restricting shell access to
+    /// some administrators later is a change here and not a change to a
+    /// program running as the operator. And configd knows the uid from
+    /// `SO_PEERCRED`, which a client cannot lie about -- an audit line the
+    /// audited process wrote is worth very little.
+    ShellSession { entering: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OpTarget {
+    Version,
+    Interfaces,
+    Interface { name: String },
+}
+
+/// What a live-state request came back with.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Report {
+    Version { version: String },
+    Interfaces { interfaces: Vec<InterfaceStatus> },
+}
+
+/// One interface, as the kernel and the configuration together describe it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InterfaceStatus {
+    pub name: String,
+    /// The configured type, or `unconfigured` for a device the kernel has and
+    /// the configuration does not mention.
+    pub kind: String,
+    /// `up`, `down`, `unknown` -- from the kernel, not from the config.
+    pub state: String,
+    pub mac: Option<String>,
+    pub mtu: Option<u32>,
+    /// Addresses from the running configuration.
+    pub addresses: Vec<String>,
+    pub description: Option<String>,
+    /// Whether the kernel has this device at all. A configured interface that
+    /// is missing is the single most useful thing this command can show.
+    pub present: bool,
 }
 
 /// Where a `Load` gets its configuration.
@@ -137,6 +182,9 @@ pub enum Response {
     },
     Revisions {
         revisions: Vec<RevisionInfo>,
+    },
+    Operational {
+        report: Report,
     },
     Failed { kind: FailureKind, message: String },
 }

@@ -23,7 +23,7 @@ use std::sync::Arc;
 
 use nightshade_common::paths::Paths;
 use nightshade_proto::message::{
-    FailureKind, LoadSource, Request, Response, RevisionInfo, SessionId,
+    FailureKind, LoadSource, OpTarget, Report, Request, Response, RevisionInfo, SessionId,
 };
 use nightshade_render::{Host, Renderer};
 use nightshade_schema::config::ConfigTree;
@@ -34,6 +34,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::archive::{self, Archive};
+use crate::netif;
 use crate::confirm::{self, Marker, Pending};
 use crate::commit;
 use crate::peer::Actor;
@@ -256,7 +257,60 @@ impl Configd {
             Request::Save => self.save().await,
             Request::Load { session, source } => self.load(&session, actor, source).await,
             Request::CommitLog => self.commit_log(),
+            Request::OpShow { target } => self.op_show(target).await,
+            Request::ShellSession { entering } => self.shell_session(entering, actor),
         }
+    }
+
+    // -- live state ---------------------------------------------------------
+
+    async fn op_show(&self, target: OpTarget) -> Response {
+        let report = match target {
+            OpTarget::Version => Report::Version {
+                version: nightshade_common::VERSION.to_string(),
+            },
+            OpTarget::Interfaces => {
+                let state = self.state.lock().await;
+                Report::Interfaces {
+                    interfaces: netif::interfaces(&self.paths, &state.running),
+                }
+            }
+            OpTarget::Interface { name } => {
+                let state = self.state.lock().await;
+                match netif::interface(&self.paths, &state.running, &name) {
+                    Some(status) => Report::Interfaces {
+                        interfaces: vec![status],
+                    },
+                    None => {
+                        return Response::bad_request(format!(
+                            "{name} is neither configured nor present on this system"
+                        ));
+                    }
+                }
+            }
+        };
+        Response::Operational { report }
+    }
+
+    /// Decide whether this operator may have a shell, and record that they
+    /// asked.
+    ///
+    /// Recorded here rather than by the CLI because the uid comes from
+    /// `SO_PEERCRED` and cannot be forged -- an audit line written by the
+    /// process being audited is worth very little. Permission is decided here
+    /// for the same reason, and so that restricting it later is a change to
+    /// the daemon rather than to a program running as the operator.
+    fn shell_session(&self, entering: bool, actor: &Actor) -> Response {
+        // Everyone who reached this socket is already in the admin group.
+        // Stated rather than assumed, so the day it narrows there is one line
+        // to change.
+        warn!(
+            actor = %actor.describe(),
+            uid = actor.uid,
+            event = if entering { "shell-entered" } else { "shell-left" },
+            "operator shell"
+        );
+        Response::Ok
     }
 
     // -- committing ---------------------------------------------------------
