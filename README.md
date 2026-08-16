@@ -64,7 +64,7 @@ rather than producing a subtly broken image. `WORKDIR` already defaults to
 
 ```sh
 make installer     # cargo build --release
-make iso           # full ISO -> dist/nightshade-0.1.0-20260816.iso
+make iso           # full ISO -> dist/nightshade-0.1.0-202608160925.iso
 make iso RELEASE=1 # release naming -> dist/nightshade-0.1.0.iso
 make test-vm       # boot the ISO in QEMU/OVMF with two blank 20G disks
 make clean
@@ -83,13 +83,14 @@ The **`VERSION`** file at the repository root is the single source of truth.
 | build | name |
 |---|---|
 | release (`RELEASE=1`, or a CI tag build) | `nightshade-0.1.0.iso` |
-| everything else | `nightshade-0.1.0-20260816.iso` |
+| everything else | `nightshade-0.1.0-202608160925.iso` |
 
-Development builds carry the date because otherwise every build of 0.1.0 has
-the same filename and there is no telling which one is on the USB stick. The
-date is derived from `SOURCE_DATE_EPOCH`, not from the wall clock, so
-rebuilding a given commit reproduces the same name as well as the same bytes —
-CI sets it to the commit date.
+Development builds carry a `YYYYMMDDHHMM` UTC stamp, because otherwise every
+build of 0.1.0 has the same filename and there is no telling which one is on
+the USB stick — and a date alone is not enough when you cut several in an
+afternoon. The stamp is derived from `SOURCE_DATE_EPOCH`, not from the wall
+clock, so rebuilding a given commit reproduces the same name as well as the
+same bytes; CI sets it to the commit date.
 
 Tagging is checked: a `v0.2.0` tag whose `VERSION` still says `0.1.0` fails the
 build rather than producing an ISO whose filename disagrees with its

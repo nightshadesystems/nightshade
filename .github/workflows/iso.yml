@@ -89,7 +89,9 @@ jobs:
             iso="nightshade-${version}"
             retention=90
           else
-            iso="nightshade-${version}-$(date -u -d "@$epoch" +%Y%m%d)"
+            # YYYYMMDDHHMM in UTC, from the commit date rather than the wall
+            # clock so a rebuild of the same commit reproduces the name.
+            iso="nightshade-${version}-$(date -u -d "@$epoch" +%Y%m%d%H%M)"
             retention=14
           fi
 
@@ -169,9 +171,14 @@ jobs:
       # only half a CI. Tags keep theirs for 90 days, branch builds for 14,
       # because an untagged ISO is ~285MB of throwaway.
       #
-      # mkimage.sh writes the sha256 and the package manifest next to the ISO,
-      # so all three travel together and the manifest of any build can be
-      # diffed against the previous one.
+      # All three files in one artifact. GitHub always wraps an artifact in a
+      # zip -- there is no way to serve a raw file through the artifacts API --
+      # so splitting them would have produced three zips rather than three
+      # files, and the ISO, its checksum and the manifest that describes it
+      # belong together anyway.
+      #
+      # `gh run download <run-id>` unpacks the zip into plain files, which is
+      # the closest thing to an unzipped download that exists.
       - name: Upload the ISO
         uses: actions/upload-artifact@v7
         with:
@@ -181,8 +188,8 @@ jobs:
             dist/*.sha256
             dist/*.packages.txt
           retention-days: ${{ steps.version.outputs.retention }}
-          # The ISO is already compressed; zipping it again costs minutes and
-          # saves nothing.
+          # The ISO is already zstd-compressed inside; zipping it again costs
+          # minutes of CPU and saves essentially nothing.
           compression-level: 0
           # An empty artifact should fail the build, not warn and move on.
           if-no-files-found: error

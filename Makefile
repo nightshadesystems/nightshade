@@ -17,23 +17,27 @@ ARCH         := amd64
 
 DIST         ?= dist
 
-# Timestamps and the date in the ISO name both come from SOURCE_DATE_EPOCH, so
+# Timestamps and the stamp in the ISO name both come from SOURCE_DATE_EPOCH, so
 # rebuilding the same commit reproduces the same filename as well as the same
 # bytes. Left unset, it is simply now.
 ifeq ($(origin SOURCE_DATE_EPOCH), undefined)
 SOURCE_DATE_EPOCH := $(shell date -u +%s)
 endif
 export SOURCE_DATE_EPOCH
-BUILD_DATE   := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y%m%d)
 
-# A release is nightshade-<version>.iso. Anything else carries the build date,
+# YYYYMMDDHHMM, UTC. Minutes matter: several iterations of the same version in
+# one afternoon is the normal case while developing, and a date alone makes
+# them all the same filename.
+BUILD_STAMP  := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y%m%d%H%M)
+
+# A release is nightshade-<version>.iso. Anything else carries the build stamp,
 # because otherwise every development build of 0.1.0 has the same filename and
 # there is no way to tell which one is on the USB stick.
 RELEASE      ?= 0
 ifeq ($(RELEASE),1)
 ISO_NAME     := nightshade-$(VERSION)
 else
-ISO_NAME     := nightshade-$(VERSION)-$(BUILD_DATE)
+ISO_NAME     := nightshade-$(VERSION)-$(BUILD_STAMP)
 endif
 ISO          := $(DIST)/$(ISO_NAME).iso
 
@@ -91,7 +95,7 @@ help:
 	@echo
 	@echo "  make installer        build the Rust installer (release)"
 	@echo "  make iso              build $(ISO)"
-	@echo "  make iso RELEASE=1    build $(DIST)/nightshade-$(VERSION).iso (no date)"
+	@echo "  make iso RELEASE=1    build $(DIST)/nightshade-$(VERSION).iso (no stamp)"
 	@echo "  make test-vm          boot the ISO in QEMU/OVMF with two blank $(VM_DISK_SIZE) disks"
 	@echo "  make test-vm-disk     boot the installed system from those disks"
 	@echo "  make test-vm-degraded boot with disk 1 detached (mirror degradation test)"
