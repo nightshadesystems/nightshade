@@ -2,3 +2,4 @@
 /dist/
 *.iso
 *.iso.sha256
+*.iso.packages.txt

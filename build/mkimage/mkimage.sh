@@ -525,7 +525,14 @@ xorriso -indev "$OUTPUT" -find /EFI/BOOT/BOOTX64.EFI >/dev/null 2>&1 \
 ISO_MB=$(( $(stat -c %s "$OUTPUT") / 1048576 ))
 sha256sum "$OUTPUT" >"$OUTPUT.sha256"
 
+# The package manifest belongs next to the ISO, not only inside it and in the
+# work tree. The work tree is deleted on success, so anything that wants the
+# manifest afterwards -- a CI artifact, a diff against the previous build --
+# has nowhere to read it from otherwise.
+cp "$OUTDIR/packages-installed.txt" "$OUTPUT.packages.txt"
+
 printf '\n\033[1;32m==>\033[0m \033[1mNightshade OS %s\033[0m\n' "$VERSION" >&2
-info "iso     $OUTPUT (${ISO_MB}M)"
-info "sha256  $(cut -d' ' -f1 <"$OUTPUT.sha256")"
-info "kernel  $KVER"
+info "iso       $OUTPUT (${ISO_MB}M)"
+info "sha256    $(cut -d' ' -f1 <"$OUTPUT.sha256")"
+info "packages  $OUTPUT.packages.txt ($(wc -l <"$OUTPUT.packages.txt") packages)"
+info "kernel    $KVER"

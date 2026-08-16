@@ -64,16 +64,45 @@ rather than producing a subtly broken image. `WORKDIR` already defaults to
 
 ```sh
 make installer     # cargo build --release
-make iso           # full ISO -> dist/nightshade-<version>-amd64.iso
+make iso           # full ISO -> dist/nightshade-0.1.0-20260816.iso
+make iso RELEASE=1 # release naming -> dist/nightshade-0.1.0.iso
 make test-vm       # boot the ISO in QEMU/OVMF with two blank 20G disks
 make clean
 ```
 
 `make help` lists everything, including the degraded-mirror test targets.
 
-Useful variables: `VERSION`, `WORKDIR`, `VM_DIR`, `APT_CACHE`,
+Useful variables: `VERSION`, `RELEASE`, `WORKDIR`, `VM_DIR`, `APT_CACHE`,
 `CARGO_TARGET_DIR`, and `VM_DISPLAY=gtk` for a window instead of a serial
 console.
+
+### Versioning and ISO names
+
+The **`VERSION`** file at the repository root is the single source of truth.
+
+| build | name |
+|---|---|
+| release (`RELEASE=1`, or a CI tag build) | `nightshade-0.1.0.iso` |
+| everything else | `nightshade-0.1.0-20260816.iso` |
+
+Development builds carry the date because otherwise every build of 0.1.0 has
+the same filename and there is no telling which one is on the USB stick. The
+date is derived from `SOURCE_DATE_EPOCH`, not from the wall clock, so
+rebuilding a given commit reproduces the same name as well as the same bytes —
+CI sets it to the commit date.
+
+Tagging is checked: a `v0.2.0` tag whose `VERSION` still says `0.1.0` fails the
+build rather than producing an ISO whose filename disagrees with its
+`os-release`. Update `VERSION` (and the workspace `version` in `Cargo.toml`,
+which CI warns about separately) before tagging.
+
+Each build writes three files:
+
+```
+dist/nightshade-0.1.0-20260816.iso
+dist/nightshade-0.1.0-20260816.iso.sha256
+dist/nightshade-0.1.0-20260816.iso.packages.txt   # 264 packages, name + version
+```
 
 While iterating, `mkimage.sh -r` reuses the rootfs from a previous `-k` run and
 re-runs only the installer refresh, squashfs and ISO assembly — roughly two
@@ -288,8 +317,13 @@ and works over SSH. `VM_DISPLAY=gtk` gives a window.
 ## CI
 
 [`.github/workflows/iso.yml`](.github/workflows/iso.yml) builds the installer
-and the ISO inside a `debian:trixie` container and uploads the ISO on tag
-pushes. Debian packages and the cargo registry are cached between runs.
+and the ISO inside a `debian:trixie` container. Debian packages and the cargo
+registry are cached between runs.
+
+The ISO, its checksum and its package manifest are uploaded on **every** run —
+kept 90 days for tags, 14 for branch builds, since an untagged ISO is ~285MB of
+throwaway. Artifact upload is set to fail on an empty match, so a build that
+produces nothing fails loudly instead of succeeding with an empty artifact.
 
 The container needs **`--privileged`**: `debootstrap` creates device nodes with
 `mknod`, and the build bind-mounts `/proc`, `/sys` and `/dev` into the chroot.

@@ -61,7 +61,7 @@ jobs:
           # actions/checkout wants git to trust the workspace it mounts.
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install the Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -70,17 +70,47 @@ jobs:
         id: version
         run: |
           set -euo pipefail
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            # v0.2.0 -> 0.2.0
-            version="${GITHUB_REF_NAME#v}"
+
+          version="$(tr -d '[:space:]' <VERSION)"
+          [ -n "$version" ] || { echo "::error::VERSION is empty"; exit 1; }
+
+          # Both the ISO's internal timestamps and the date in its filename come
+          # from the commit, so rebuilding a commit reproduces the same name and
+          # the same bytes.
+          epoch="$(git log -1 --pretty=%ct)"
+
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            tag="${GITHUB_REF_NAME#v}"
+            if [ "$tag" != "$version" ]; then
+              echo "::error::tag $GITHUB_REF_NAME disagrees with VERSION ($version)." \
+                   "Update VERSION before tagging."
+              exit 1
+            fi
+            iso="nightshade-${version}"
+            retention=90
           else
-            version="0.1.0+$(echo "${GITHUB_SHA}" | cut -c1-8)"
+            iso="nightshade-${version}-$(date -u -d "@$epoch" +%Y%m%d)"
+            retention=14
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Building version $version"
+
+          # The installer reports its own version from Cargo. A mismatch is not
+          # worth failing a build over, but it is worth saying out loud.
+          cargo_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
+          if [ "$cargo_version" != "$version" ]; then
+            echo "::warning::VERSION is $version but Cargo.toml says $cargo_version;" \
+                 "nightshade-install --version will disagree with the ISO."
+          fi
+
+          {
+            echo "version=$version"
+            echo "iso=$iso"
+            echo "epoch=$epoch"
+            echo "retention=$retention"
+          } >>"$GITHUB_OUTPUT"
+          echo "Building $iso.iso"
 
       - name: Cache Debian packages
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ env.APT_CACHE }}
           # The manifests decide what gets downloaded, so they decide the key.
@@ -89,7 +119,7 @@ jobs:
             nightshade-apt-
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -105,6 +135,8 @@ jobs:
         run: cargo build --release --locked
 
       - name: Build the ISO
+        env:
+          SOURCE_DATE_EPOCH: ${{ steps.version.outputs.epoch }}
         run: |
           set -euo pipefail
           mkdir -p "$APT_CACHE" dist
@@ -114,12 +146,8 @@ jobs:
           # The bit belongs in the repo -- `git update-index --chmod=+x` -- and
           # this line just stops a lost one from costing a CI round trip.
           chmod +x build/mkimage/mkimage.sh
-          # SOURCE_DATE_EPOCH makes the squashfs and ISO timestamps
-          # deterministic; the commit date is the natural value for it.
-          SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
-          export SOURCE_DATE_EPOCH
           build/mkimage/mkimage.sh \
-            -o "dist/nightshade-${{ steps.version.outputs.version }}-amd64.iso" \
+            -o "dist/${{ steps.version.outputs.iso }}.iso" \
             -v "${{ steps.version.outputs.version }}" \
             -w "$WORKDIR" \
             -c "$APT_CACHE" \
@@ -137,23 +165,24 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      # Every run gets an artifact for inspection; only tags get a long
-      # retention, because untagged ISOs are ~283MB of throwaway.
+      # Uploaded on every run, not just tags: a build you cannot download is
+      # only half a CI. Tags keep theirs for 90 days, branch builds for 14,
+      # because an untagged ISO is ~285MB of throwaway.
+      #
+      # mkimage.sh writes the sha256 and the package manifest next to the ISO,
+      # so all three travel together and the manifest of any build can be
+      # diffed against the previous one.
       - name: Upload the ISO
-        if: github.ref_type == 'tag'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: nightshade-${{ steps.version.outputs.version }}-amd64
+          name: ${{ steps.version.outputs.iso }}
           path: |
             dist/*.iso
             dist/*.sha256
-          retention-days: 90
+            dist/*.packages.txt
+          retention-days: ${{ steps.version.outputs.retention }}
+          # The ISO is already compressed; zipping it again costs minutes and
+          # saves nothing.
           compression-level: 0
-
-      - name: Upload the package manifest
-        uses: actions/upload-artifact@v4
-        with:
-          name: package-manifest-${{ steps.version.outputs.version }}
-          path: ${{ env.WORKDIR }}/out/packages-installed.txt
-          retention-days: 14
-          if-no-files-found: warn
+          # An empty artifact should fail the build, not warn and move on.
+          if-no-files-found: error

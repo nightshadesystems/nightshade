@@ -6,11 +6,36 @@
 # The ISO build needs root (debootstrap, chroot, bind mounts). Targets that
 # need it pick up $(SUDO) automatically.
 
-VERSION      ?= 0.1.0
+# The VERSION file at the repo root is the single source of truth. CI checks a
+# release tag against it, so `git tag v0.2.0` without updating VERSION fails
+# rather than shipping an ISO whose name disagrees with its os-release.
+VERSION      ?= $(shell tr -d '[:space:]' <VERSION)
+ifeq ($(strip $(VERSION)),)
+$(error VERSION is empty or the VERSION file is missing from the repo root)
+endif
 ARCH         := amd64
 
 DIST         ?= dist
-ISO          := $(DIST)/nightshade-$(VERSION)-$(ARCH).iso
+
+# Timestamps and the date in the ISO name both come from SOURCE_DATE_EPOCH, so
+# rebuilding the same commit reproduces the same filename as well as the same
+# bytes. Left unset, it is simply now.
+ifeq ($(origin SOURCE_DATE_EPOCH), undefined)
+SOURCE_DATE_EPOCH := $(shell date -u +%s)
+endif
+export SOURCE_DATE_EPOCH
+BUILD_DATE   := $(shell date -u -d "@$(SOURCE_DATE_EPOCH)" +%Y%m%d)
+
+# A release is nightshade-<version>.iso. Anything else carries the build date,
+# because otherwise every development build of 0.1.0 has the same filename and
+# there is no way to tell which one is on the USB stick.
+RELEASE      ?= 0
+ifeq ($(RELEASE),1)
+ISO_NAME     := nightshade-$(VERSION)
+else
+ISO_NAME     := nightshade-$(VERSION)-$(BUILD_DATE)
+endif
+ISO          := $(DIST)/$(ISO_NAME).iso
 
 # Work tree and VM state default to a native Linux filesystem. Under WSL the
 # repo itself often lives on /mnt/c (9p), which cannot hold a rootfs and is slow
@@ -66,6 +91,7 @@ help:
 	@echo
 	@echo "  make installer        build the Rust installer (release)"
 	@echo "  make iso              build $(ISO)"
+	@echo "  make iso RELEASE=1    build $(DIST)/nightshade-$(VERSION).iso (no date)"
 	@echo "  make test-vm          boot the ISO in QEMU/OVMF with two blank $(VM_DISK_SIZE) disks"
 	@echo "  make test-vm-disk     boot the installed system from those disks"
 	@echo "  make test-vm-degraded boot with disk 1 detached (mirror degradation test)"
