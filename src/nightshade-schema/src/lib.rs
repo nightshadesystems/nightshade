@@ -47,3 +47,11 @@
 //! help. Reading the schema for metadata is not the same as validating in the
 //! client: validation answers happen in configd, once, where they cannot be
 //! bypassed by a caller that is not the CLI.
+
+pub mod config;
+pub mod curly;
+pub mod lex;
+pub mod path;
+
+pub use config::{ConfigTree, Node};
+pub use path::Path;
