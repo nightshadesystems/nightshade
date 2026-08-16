@@ -188,9 +188,11 @@ jobs:
       - name: Test the workspace
         run: cargo test --workspace --locked
 
-      # Scoped: only the installer goes into the ISO in this phase.
-      - name: Build the installer
-        run: cargo build --release --locked -p nightshade-installer
+      # Three binaries: the installer, which runs in the live session, and
+      # configd and ns, which run on the installed box. All built here so all
+      # three link against trixie's glibc rather than the runner's.
+      - name: Build the binaries that go into the image
+        run: cargo build --release --locked -p nightshade-installer -p nightshade-configd -p nightshade-cli
 
       - name: Build the ISO
         env:
@@ -209,7 +211,8 @@ jobs:
             -v "${{ steps.version.outputs.version }}" \
             -w "$WORKDIR" \
             -c "$APT_CACHE" \
-            -b target/release/nightshade-installer
+            -b target/release/nightshade-installer \
+            -B target/release
 
       - name: Summarise
         run: |

@@ -56,6 +56,33 @@ impl Harness {
         Self::start_in(dir, host)
     }
 
+    /// Start over as a reboot would: `/run` is gone, the disk is not.
+    ///
+    /// The distinction is the whole reason `boot` checks before applying
+    /// `config.boot`. A restart finds a running configuration under `/run` and
+    /// leaves the box alone; a reboot finds nothing and applies what was
+    /// saved.
+    pub fn reboot(self) -> Self {
+        let previous = Arc::clone(&self.host);
+        let dir = self.stop();
+        let paths = Paths::under(dir.path());
+
+        // The machine's filesystem survives, minus the tmpfs. That includes
+        // `/run/systemd/network`, so the rendered interface files really are
+        // gone and really are written again.
+        let tmpfs = paths.root().join("run");
+        let fresh = Arc::new(MockHost::new());
+        for (path, contents) in previous.files() {
+            if !path.starts_with(&tmpfs) {
+                let _ = nightshade_render::Host::write(fresh.as_ref(), &path, &contents);
+            }
+        }
+        fresh.take_ops();
+
+        let _ = std::fs::remove_dir_all(&tmpfs);
+        Self::start_in(dir, fresh)
+    }
+
     /// What the renderers did, so a test can assert on the ordering and the
     /// files without a network.
     pub fn host(&self) -> &MockHost {
@@ -86,6 +113,7 @@ impl Harness {
                     Configd::start(Schema::compiled(), serving, host).expect("configd starts"),
                 );
                 configd.resume().await;
+                configd.boot().await;
                 let bound = Bound::create(&socket, &access).expect("the socket binds");
                 Server::new(configd, access).run(bound, rx).await;
             });

@@ -1,0 +1,107 @@
+# The Nightshade configuration daemon.
+#
+# Started at boot rather than on first connection, even though the socket is
+# activatable: its first job is to apply /etc/nightshade/config.boot, and a
+# firewall that only configures itself once somebody logs in is not configured.
+
+[Unit]
+Description=Nightshade configuration daemon
+Documentation=https://github.com/zagdrath/nightshade
+
+Requires=nightshade-configd.socket
+After=nightshade-configd.socket
+
+# Restart, but not into a loop. A daemon that cannot start -- a broken schema,
+# a socket it cannot have -- should stop and stay stopped so the failure is
+# visible, rather than filling the journal at one line a second.
+#
+# These belong in [Unit], not [Service]. systemd ignores them with a warning in
+# the wrong section, which is a rate limit that silently does not exist.
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+# networkd has to exist before there is any point reloading it, and the box
+# should not be declared network-ready until this has applied the config.
+After=systemd-networkd.service dbus.service
+Wants=systemd-networkd.service
+Before=network-online.target
+
+[Service]
+Type=exec
+ExecStart=/usr/sbin/nightshade-configd
+
+Restart=on-failure
+RestartSec=2s
+
+# Panics abort rather than unwind (see the workspace release profile), which
+# systemd sees as a signal. That is a restart, and the state configd must not
+# lose is on disk before it could ever get there.
+SuccessExitStatus=0
+
+# ---------------------------------------------------------------------------
+# hardening
+# ---------------------------------------------------------------------------
+#
+# configd runs as root. It has to: it writes /etc, drives systemd over D-Bus,
+# and owns files no unprivileged user may. What follows takes back everything
+# root implies that it does not actually use. Each line is here for a reason,
+# and each carve-out below is a thing it genuinely needs.
+
+NoNewPrivileges=yes
+
+# The whole filesystem read-only except what is listed. The list is the honest
+# statement of what this daemon writes:
+ProtectSystem=strict
+#   the saved configuration, written by `save`
+ReadWritePaths=/etc/nightshade
+#   the archive and the last-applied artifacts a failed commit restores from
+ReadWritePaths=/var/lib/nightshade
+#   sessions, running state, the pending-confirm marker, the socket
+ReadWritePaths=/run/nightshade
+#   rendered .network/.netdev/.link files -- only ones marked `-ns-`
+ReadWritePaths=/run/systemd/network
+#   owned outright by the system renderer; this phase runs no systemd-resolved
+ReadWritePaths=/etc/resolv.conf
+#   one line of it, keeping the configured host name resolvable
+ReadWritePaths=/etc/hosts
+
+ProtectHome=yes
+PrivateTmp=yes
+ProtectProc=invisible
+ProcSubset=pid
+
+# Nothing here tunes the kernel, loads modules or moves cgroups. The tools it
+# runs -- hostnamectl, timedatectl, networkctl -- ask systemd to do the work
+# over D-Bus, in systemd's own process.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=no
+RestrictNamespaces=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+
+# AF_UNIX for its own socket and for D-Bus. AF_NETLINK because the tools it
+# execs use it, and a filter here applies to them too. Nothing needs AF_INET:
+# configd does not speak to the network it configures.
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# CAP_NET_ADMIN is the one capability kept, and it is worth being precise
+# about why: today configd changes nothing on an interface itself -- networkctl
+# does, in systemd's process -- so nothing here uses it. It is retained because
+# the alternative to keeping it is finding out, on an appliance, that a direct
+# netlink path added later silently cannot work. Everything else root would
+# have had is gone: no CAP_SYS_ADMIN, no CAP_SYS_MODULE, no CAP_DAC_OVERRIDE
+# (the files are root's own), no CAP_CHOWN (systemd creates the socket).
+CapabilityBoundingSet=CAP_NET_ADMIN
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -120,6 +120,15 @@ impl Paths {
         self.at("run/nightshade/pending-confirm.json")
     }
 
+    /// Why the box came up on defaults, if it did.
+    ///
+    /// Written by configd at startup and read by `ns`, which says so before
+    /// the first prompt. The journal has it too, and the journal is not where
+    /// somebody logging in to fix a firewall looks first.
+    pub fn boot_failure(&self) -> PathBuf {
+        self.at("run/nightshade/boot-failed")
+    }
+
     // -- /var/lib/nightshade: state that is not config ---------------------
 
     pub fn state_dir(&self) -> PathBuf {

@@ -41,6 +41,19 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // after the first client happens to connect.
     configd.resume().await;
 
+    // Apply the saved configuration. After `resume`, so a commit that was
+    // waiting on confirmation is settled before anything else touches the box.
+    let outcome = configd.boot().await;
+    match outcome.failed() {
+        // On the console as well as in the journal. This is the one startup
+        // result somebody has to see, and they are about to log in to a box
+        // that is not configured the way they left it.
+        Some(reason) => eprintln!(
+            "nightshade-configd: started with DEFAULT configuration only.\n{reason}"
+        ),
+        None => info!(?outcome, "startup"),
+    }
+
     // systemd's socket if there is one, ours if not. Both give the same
     // socket with the same mode; the difference is only who created it.
     let bound = match Bound::from_systemd()? {

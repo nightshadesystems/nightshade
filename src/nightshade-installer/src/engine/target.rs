@@ -142,13 +142,36 @@ pub fn enable_zfs_services(step: &mut Stepper) -> Result<()> {
 pub fn create_account(config: &InstallConfig) -> Result<()> {
     logging::info(format!("creating account {DEFAULT_USER}"));
 
+    // `ns` is the login shell when the image has a configuration system, and
+    // /bin/bash when it does not. Checked rather than assumed: setting a login
+    // shell that is not there produces an account that cannot be logged into,
+    // and this is the only account on the box.
+    //
+    // The operator is not shut out of a real shell by this. `shell` from
+    // operational mode drops to bash as their own uid, and root still has
+    // /bin/bash -- it is just that reaching one is a deliberate, audited step
+    // rather than what happens by default.
+    let ns = std::path::Path::new(TARGET).join("usr/bin/ns");
+    let shell = if ns.exists() { "/usr/bin/ns" } else { "/bin/bash" };
+    if shell == "/bin/bash" {
+        logging::info("no ns binary in the image; the account gets /bin/bash");
+    }
+
+    // sudo to administer the box, nightshade-admin to talk to configd. The
+    // group only exists in an image that has a configuration system.
+    let groups = if ns.exists() {
+        "sudo,nightshade-admin"
+    } else {
+        "sudo"
+    };
+
     Cmd::new("useradd")
         .in_chroot(TARGET)
         .arg("--create-home")
         .arg("--shell")
-        .arg("/bin/bash")
+        .arg(shell)
         .arg("--groups")
-        .arg("sudo")
+        .arg(groups)
         .arg("--comment")
         .arg("Nightshade administrator")
         .arg(DEFAULT_USER)

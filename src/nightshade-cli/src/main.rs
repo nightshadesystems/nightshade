@@ -160,6 +160,7 @@ fn interactive(cli: &mut Cli) -> Outcome {
 
     println!("Nightshade {}", nightshade_common::VERSION);
     println!("`?` lists what can go here, <Tab> completes it, `exit` leaves.\n");
+    warn_if_boot_failed(&Paths::system());
 
     loop {
         cli.refresh();
@@ -203,6 +204,25 @@ fn interactive(cli: &mut Cli) -> Outcome {
         }
     }
     Outcome::Ok
+}
+
+/// Say so, before the first prompt, if the box came up on defaults.
+///
+/// configd records the reason at startup and logs it. The journal is correct
+/// and is not where somebody logging in to fix a firewall looks first -- and
+/// somebody logging into a box whose configuration did not load is about to
+/// wonder loudly where it went.
+fn warn_if_boot_failed(paths: &Paths) {
+    let Ok(reason) = std::fs::read_to_string(paths.boot_failure()) else {
+        return;
+    };
+    eprintln!("WARNING: this system started with its DEFAULT configuration.");
+    eprintln!("{}", reason.trim_end());
+    eprintln!(
+        "\nThe saved configuration is still in {}. Fix it and `load`,\n\
+         or configure the system and `commit`.\n",
+        paths.config_boot().display()
+    );
 }
 
 fn history_file() -> Option<std::path::PathBuf> {

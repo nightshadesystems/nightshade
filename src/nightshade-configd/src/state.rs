@@ -222,6 +222,35 @@ impl Configd {
         &self.paths
     }
 
+    pub(crate) fn schema(&self) -> &'static Schema {
+        self.schema
+    }
+
+    pub(crate) fn renderers(&self) -> &[Box<dyn Renderer>] {
+        &self.renderers
+    }
+
+    /// The generation recovered from `/run`, or `None` on a real boot.
+    pub(crate) async fn recovered_generation(&self) -> Option<u64> {
+        let state = self.state.lock().await;
+        (state.generation > 0 || !state.running.is_empty()).then_some(state.generation)
+    }
+
+    /// Take `config` as the running configuration without applying it.
+    ///
+    /// For the boot path only, which has already applied it. A commit does
+    /// both together; splitting them anywhere else would let the two drift.
+    pub(crate) async fn adopt(&self, config: ConfigTree) -> u64 {
+        let mut state = self.state.lock().await;
+        state.running = config;
+        state.generation += 1;
+        let generation = state.generation;
+        if let Err(e) = save_running(&self.paths, &state.running, generation) {
+            warn!(error = %e, "could not record the running configuration");
+        }
+        generation
+    }
+
     pub async fn session_count(&self) -> usize {
         self.state.lock().await.sessions.len()
     }

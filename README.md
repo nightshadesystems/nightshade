@@ -1,12 +1,14 @@
 # Nightshade
 
 A minimal Debian 13 (trixie) based firewall operating system, built from
-scratch: a reproducible live ISO pipeline, a branded GRUB, and a Rust installer
-that puts the system on disk with ZFS — optionally as a two-disk RAID1 mirror.
+scratch: a reproducible live ISO pipeline, a branded GRUB, a Rust installer
+that puts the system on disk with ZFS — optionally as a two-disk RAID1 mirror —
+and a configuration system with a candidate/commit/rollback model behind a
+modal operator CLI.
 
-This repository is phase 1: **base image + installer**. There is no config
-daemon, CLI or API here yet; the layout leaves room for them without
-pre-building anything.
+Phases 1 and 2 are here: **base image + installer**, and **the configuration
+system**. There is no API frontend yet; the protocol is shaped so that adding
+one is additive.
 
 ---
 
@@ -25,8 +27,18 @@ build/
     grub.cfg.in     ISO boot menu template
     default-grub.in /etc/default/grub for the installed system
   branding/         os-release, issue, motd
+schema/             the configuration schema, in YAML. The only place a
+                    config node is defined.
+dist/systemd/       configd's units and tmpfiles rules
+fuzz/               cargo-fuzz targets, in their own workspace
 src/
-  nightshade-installer/   Rust crate: the installer
+  nightshade-common/      paths, shared constants
+  nightshade-schema/      schema, validation, the curly-brace config format
+  nightshade-proto/       the framed-CBOR protocol
+  nightshade-render/      config -> systemd-networkd and system settings
+  nightshade-configd/     the configuration daemon
+  nightshade-cli/         `ns`, the operator CLI
+  nightshade-installer/   the installer
 ```
 
 ---
@@ -63,9 +75,11 @@ rather than producing a subtly broken image. `WORKDIR` already defaults to
 ## Building
 
 ```sh
-make installer     # cargo build --release
+make installer     # the installer alone
+make configd       # nightshade-configd and ns
 make iso           # full ISO -> dist/nightshade-0.1.0-202608160925.iso
 make iso RELEASE=1 # release naming -> dist/nightshade-0.1.0.iso
+make test          # cargo test --workspace
 make test-vm       # boot the ISO in QEMU/OVMF with two blank 20G disks
 make clean
 ```
@@ -279,30 +293,115 @@ needed it boots a bootloader that no longer matches the system.
 is `nofail` so a dead first disk cannot drop the machine into emergency mode
 when it could have booted perfectly well off the survivor.
 
-### No network configuration (yet)
+### Network configuration
 
-The installed system deliberately has **no network configuration and no DHCP
-client**. There is no `ifupdown`, no `isc-dhcp-client` and nothing enabled in
-`systemd-networkd`, so an installed Nightshade box comes up with loopback only.
+An installed box comes up with **no addresses until something is configured**.
+There is no DHCP client and no `ifupdown`; `systemd-networkd` is enabled and
+has nothing to do until configd writes it some files.
 
-That is the right default for a firewall whose interface assignment is a
-policy decision, and configuring it is the config daemon's job in a later
-phase. Until then, to get a box online by hand:
+That is the right default for a firewall whose interface assignment is a policy
+decision. Configuring it is what the configuration system is for.
 
-```sh
-printf '[Match]\nName=en*\n[Network]\nDHCP=yes\n' \
-  | sudo tee /etc/systemd/network/10-dhcp.network
-sudo systemctl enable --now systemd-networkd
+`systemd-resolved` is not installed, so `/etc/resolv.conf` is owned outright by
+the system renderer, header and all — but only once something has been
+committed. A box with nothing saved has the file the image gave it.
+
+---
+
+## The configuration system
+
+Three programs and a schema.
+
+**`schema/`** is YAML, and is the only place a configuration node is defined.
+The validators, the defaults, the `?` help, the tab-completion tables and the
+CLI's command tree all come from it. `build.rs` compiles it into Rust at build
+time, so a schema that does not load fails the build rather than the box, and
+nothing on the appliance goes looking for it on disk. A test asserts the
+compiled schema and the source files describe the same tree.
+
+**`nightshade-configd`** owns everything: validation, the candidate/running/
+saved states, commit, rollback, rendering and applying. It runs as root from a
+socket-activated unit and authenticates every connection with `SO_PEERCRED`,
+recording the uid as the actor on every change.
+
+**`ns`** is a thin client and a login shell. It edits nothing, applies nothing
+and validates nothing — it turns a typed line into a request and prints the
+answer, with configd's error text passed through verbatim.
+
+### The config file
+
+`/etc/nightshade/config.boot` is a VyOS/JunOS-style curly-brace document:
+
+```
+system {
+    host-name fw-01
+    name-server 1.1.1.1
+}
+interfaces {
+    /* the uplink */
+    ethernet eth0 {
+        address 192.168.1.1/24
+        mtu 9000
+    }
+}
 ```
 
-`systemd-resolved` is not installed either, so `/etc/resolv.conf` is yours to
-write.
+Hand-editable by design, so it gets a real parser: strict grammar, a line and a
+column on every error, comments carried into the tree, and
+`parse(render(tree)) == tree` as a property test and a fuzz target.
+
+### Commit
+
+```
+validate -> constraints -> diff -> order -> render -> check -> apply -> verify -> promote
+```
+
+Everything knowable without touching the machine is decided first, so the
+common failures cost an error message rather than a half-configured firewall.
+A failed apply restores the previous rendered artifacts; a failed restore says
+so in as many words, because at that point the box matches no configuration at
+all.
+
+`commit confirm 5` applies the change and arms a rollback timer **inside
+configd**, with a marker file recording the configuration to go back to. Losing
+the session rolls it back; so does configd restarting, or being down when the
+deadline passes.
+
+### On boot
+
+`config.boot` is parsed, validated, rendered and applied. If any of that fails
+the box comes up on schema defaults — deliberately *without* a network — and
+the reason is written where `ns` prints it before the first prompt. A firewall
+whose policy failed to load must not bring up addresses on the interfaces whose
+trust level is exactly what did not load.
+
+### Using it
+
+```
+nightshade@nightshade> configure
+nightshade@nightshade# set interfaces ethernet eth0 address 192.168.1.1/24
+nightshade@nightshade# compare
+nightshade@nightshade# commit confirm 5
+nightshade@nightshade# confirm
+nightshade@nightshade# save
+```
+
+`?` lists what can go here, `<Tab>` completes it. `| match`, `| count`,
+`| no-more` and `| display json` are post-processing inside `ns` — not pipes,
+and nothing is spawned. `shell` from operational mode drops to bash as your own
+uid, gated and logged by configd; there is no other way to a shell, and
+[a test audits the source](src/nightshade-cli/tests/no_shell_escapes.rs) to
+keep it that way.
+
+Non-interactively: `ns -c "show interfaces" --json`, or `ns -f batch-file`.
+Exit codes are 0 for success, 1 for a command error, 2 for a configuration one.
 
 ---
 
 ## Testing
 
 ```sh
+make test                         # the whole workspace
 make test-vm                      # boot the ISO, two blank disks
 make test-vm-disk                 # boot the installed system
 make test-vm-degraded             # boot with disk 1 detached

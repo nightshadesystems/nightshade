@@ -31,6 +31,10 @@ VERSION=""
 WORKDIR="/var/tmp/nightshade-build"
 CACHE_DIR=""
 INSTALLER_BIN=""
+# Directory holding the configuration-system binaries (nightshade-configd, ns).
+# Optional: without it the image is phase 1 -- it boots and installs, and has no
+# configuration system.
+CONFIGD_DIR=""
 KEEP_WORK=0
 REUSE_ROOTFS=0
 
@@ -48,6 +52,8 @@ options:
                  WSL's /mnt/c cannot hold a rootfs (no device nodes, no owners)
   -b PATH        nightshade-installer binary to embed (default: auto-detect from
                  target/release, or omit and the live session drops to a shell)
+  -B DIR         directory holding nightshade-configd and ns. Omit and the
+                 image has no configuration system, which is what phase 1 was.
   -c DIR         apt archive cache directory, reused across builds (CI)
   -m URL         Debian mirror (default: $MIRROR)
   -s SUITE       Debian suite (default: $SUITE)
@@ -67,12 +73,13 @@ EOF
     exit 2
 }
 
-while getopts ":o:v:w:b:c:m:s:krh" opt; do
+while getopts ":o:v:w:b:B:c:m:s:krh" opt; do
     case "$opt" in
         o) OUTPUT="$OPTARG" ;;
         v) VERSION="$OPTARG" ;;
         w) WORKDIR="$OPTARG" ;;
         b) INSTALLER_BIN="$OPTARG" ;;
+        B) CONFIGD_DIR="$OPTARG" ;;
         c) CACHE_DIR="$OPTARG" ;;
         m) MIRROR="$OPTARG" ;;
         s) SUITE="$OPTARG" ;;
@@ -302,6 +309,18 @@ cp    "$HERE/packages.list"       "$STAGING/packages.list"
 cp    "$HERE/packages-live.list"  "$STAGING/packages-live.list"
 cp    "$HERE/packages-build.list" "$STAGING/packages-build.list"
 [ -n "$INSTALLER_BIN" ] && install -m 0755 "$INSTALLER_BIN" "$STAGING/bin/nightshade-installer"
+
+# The configuration system. Both binaries or neither: an image with configd and
+# no `ns` has nothing that can talk to it, and one with `ns` and no configd
+# gives an operator a login shell that cannot do anything.
+if [ -n "$CONFIGD_DIR" ]; then
+    for binary in nightshade-configd ns; do
+        [ -x "$CONFIGD_DIR/$binary" ] || die "missing $CONFIGD_DIR/$binary"
+        install -m 0755 "$CONFIGD_DIR/$binary" "$STAGING/bin/$binary"
+    done
+    cp -a "$BUILD_DIR/../dist/systemd" "$STAGING/systemd"
+    info "configuration system: $CONFIGD_DIR"
+fi
 
 cat >"$STAGING/build.env" <<EOF
 VERSION='$VERSION'

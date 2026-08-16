@@ -53,6 +53,10 @@ APT_CACHE    ?=
 CARGO_TARGET_DIR ?= target
 export CARGO_TARGET_DIR
 INSTALLER    := $(CARGO_TARGET_DIR)/release/nightshade-installer
+CONFIGD      := $(CARGO_TARGET_DIR)/release/nightshade-configd
+NS           := $(CARGO_TARGET_DIR)/release/ns
+# mkimage takes a directory and expects both binaries in it.
+CONFIGD_DIR  := $(CARGO_TARGET_DIR)/release
 
 # VM settings
 VM_MEM       ?= 4096
@@ -93,14 +97,16 @@ all: iso
 help:
 	@echo "Nightshade $(VERSION)"
 	@echo
-	@echo "  make installer        build the Rust installer (release)"
+	@echo "  make installer        build the installer (release)"
+	@echo "  make configd          build nightshade-configd and ns (release)"
+	@echo "  make test             cargo test --workspace"
 	@echo "  make iso              build $(ISO)"
 	@echo "  make iso RELEASE=1    build $(DIST)/nightshade-$(VERSION).iso (no stamp)"
 	@echo "  make test-vm          boot the ISO in QEMU/OVMF with two blank $(VM_DISK_SIZE) disks"
 	@echo "  make test-vm-disk     boot the installed system from those disks"
 	@echo "  make test-vm-degraded boot with disk 1 detached (mirror degradation test)"
 	@echo "  make vm-reset         wipe VM disks and UEFI vars"
-	@echo "  make clean            remove dist/, target/ and the build work tree"
+	@echo "  make clean            remove built ISOs, target/ and the build work tree"
 	@echo
 	@echo "  VM_DISPLAY=gtk make test-vm    run with a window instead of serial"
 
@@ -108,22 +114,30 @@ help:
 # installer
 # ---------------------------------------------------------------------------
 
-# Scoped to the one crate on purpose. The workspace now also holds configd, the
-# CLI and their dependency trees; building all of it under the release profile
-# (LTO, one codegen unit) to produce a binary the ISO does not yet contain adds
-# minutes to every `make iso`.
 installer:
 	cargo build --release --locked -p nightshade-installer
 	@ls -l $(INSTALLER)
 
 $(INSTALLER): installer
 
+# The configuration system: the daemon and the CLI. Separate from `installer`
+# because the installer runs in the live session and these run on the installed
+# box, and because a broken configd should not stop an ISO being built to
+# recover from it.
+.PHONY: configd
+configd:
+	cargo build --release --locked -p nightshade-configd -p nightshade-cli
+	@ls -l $(CONFIGD) $(NS)
+
+$(CONFIGD): configd
+$(NS): configd
+
 # ---------------------------------------------------------------------------
 # iso
 # ---------------------------------------------------------------------------
 
-iso: $(INSTALLER)
-	$(SUDO) build/mkimage/mkimage.sh $(MKIMAGE_ARGS) -b $(INSTALLER)
+iso: $(INSTALLER) $(CONFIGD) $(NS)
+	$(SUDO) build/mkimage/mkimage.sh $(MKIMAGE_ARGS) -b $(INSTALLER) -B $(CONFIGD_DIR)
 
 # Build the ISO without the Rust crate. The live session comes up and drops to a
 # shell instead of running an installer; useful for iterating on the image

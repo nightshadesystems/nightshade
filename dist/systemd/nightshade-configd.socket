@@ -1,0 +1,31 @@
+# The socket every Nightshade client talks to.
+#
+# Owned by systemd rather than by configd. That is what makes the mode and the
+# group a packaging decision instead of a race in the daemon: the socket exists
+# with the right ownership from early boot, before anything has run as root to
+# create it. A client that connects while configd is restarting waits in the
+# backlog rather than getting ECONNREFUSED and telling an operator the daemon
+# is down.
+
+[Unit]
+Description=Nightshade configuration daemon socket
+Documentation=https://github.com/zagdrath/nightshade
+# The directory the socket lives in is created by tmpfiles, not by us.
+After=nightshade-tmpfiles.service
+
+[Socket]
+ListenStream=/run/nightshade/configd.sock
+
+# Group-writable, no world access. configd checks the peer's credentials as
+# well; this stops an unauthorised connection ever reaching the CBOR decoder,
+# and that decoder is the part written by us.
+SocketMode=0660
+SocketUser=root
+SocketGroup=nightshade-admin
+
+# A stale socket file after a stop would make the next client wait on something
+# nothing is listening to.
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

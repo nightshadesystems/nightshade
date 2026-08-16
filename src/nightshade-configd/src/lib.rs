@@ -70,6 +70,7 @@
 //! leaves the operator no move but to discard.
 
 pub mod archive;
+pub mod boot;
 pub mod commit;
 pub mod confirm;
 pub mod logging;
