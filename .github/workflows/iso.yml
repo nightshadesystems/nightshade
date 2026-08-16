@@ -13,6 +13,58 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Coverage-guided fuzzing of the two things that consume operator input: the
+  # config file parser and the value validators. Its own job, on the runner
+  # rather than in the trixie container, because libFuzzer needs a nightly
+  # toolchain and sanitizer support that have no business in the image build.
+  #
+  # Deliberately brief. This is a regression gate that runs on every push, not
+  # a fuzzing campaign; a real campaign runs for hours somewhere else and seeds
+  # its findings back here as corpus entries.
+  fuzz:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@nightly
+
+      # cargo-fuzz takes a couple of minutes to build from source, and it does
+      # not change between runs. The key is the version so an upgrade rebuilds
+      # it and nothing else does.
+      - name: Cache cargo-fuzz
+        id: cache-cargo-fuzz
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-fuzz
+          key: cargo-fuzz-v1
+
+      - name: Install cargo-fuzz
+        if: steps.cache-cargo-fuzz.outputs.cache-hit != 'true'
+        run: cargo install cargo-fuzz --locked
+
+      # `-runs` rather than `-max_total_time`: a run count is reproducible, so
+      # a failure here can be reproduced locally with the same number, and a
+      # slow runner produces a slower job rather than a weaker test.
+      - name: Fuzz
+        working-directory: fuzz
+        run: |
+          set -euo pipefail
+          for target in curly_parse curly_roundtrip path_parse value_check; do
+            echo "::group::$target"
+            cargo fuzz run "$target" -- -runs=20000 -max_len=512
+            echo "::endgroup::"
+          done
+
+      # A crash leaves the input that caused it behind. Without this it is a
+      # red X and a log, and reproducing it means guessing.
+      - name: Upload crash inputs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-artifacts
+          path: fuzz/artifacts/
+          if-no-files-found: ignore
+
   build:
     runs-on: ubuntu-latest
 

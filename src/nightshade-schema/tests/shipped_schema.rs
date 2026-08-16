@@ -63,6 +63,23 @@ fn violations(schema: &Schema, tree: &ConfigTree) -> String {
 // the schema itself
 // ---------------------------------------------------------------------------
 
+/// The compiled-in schema and the one read from `schema/` must be the same
+/// tree.
+///
+/// Without this, the generated path is free to drift from the one every other
+/// test exercises -- and the generated one is the only one that ships. A
+/// difference here means either the code generator dropped something or the
+/// loader and the generator disagree about what a field means.
+#[test]
+fn generated_matches_the_source_files() {
+    assert_eq!(
+        *Schema::compiled(),
+        schema(),
+        "the compiled-in schema differs from schema/; \
+         if the YAML changed, the build script should have regenerated it"
+    );
+}
+
 #[test]
 fn every_node_has_help_and_a_reachable_type() {
     fn walk(node: &SchemaNode, at: &str, seen: &mut usize) {

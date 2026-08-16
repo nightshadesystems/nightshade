@@ -1,0 +1,52 @@
+# Fuzz targets, in their own workspace.
+#
+# libfuzzer-sys needs a nightly toolchain and builds with sanitizer flags that
+# have no business in the appliance build. Keeping this out of the main
+# workspace means `cargo build --workspace` on stable cannot be broken by it,
+# and `cargo fuzz` still finds it because it is a plain package.
+
+[package]
+name = "nightshade-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2024"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+nightshade-schema = { path = "../src/nightshade-schema" }
+
+[profile.release]
+debug = true
+
+[[bin]]
+name = "curly_parse"
+path = "fuzz_targets/curly_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "curly_roundtrip"
+path = "fuzz_targets/curly_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "path_parse"
+path = "fuzz_targets/path_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "value_check"
+path = "fuzz_targets/value_check.rs"
+test = false
+doc = false
+bench = false

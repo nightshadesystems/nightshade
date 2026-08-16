@@ -14,5 +14,16 @@ serde = { workspace = true }
 serde_yaml_ng = { workspace = true }
 thiserror = { workspace = true }
 
+# build.rs compiles src/lex.rs, path.rs, value.rs, model.rs and loader.rs
+# directly, so it needs everything those use. The duplication is the price of
+# the build-time and the run-time schema coming from one loader rather than
+# two that have to be kept in step by hand.
+[build-dependencies]
+jiff = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+serde_yaml_ng = { workspace = true }
+thiserror = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
