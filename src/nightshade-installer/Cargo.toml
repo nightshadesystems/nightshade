@@ -1,6 +1,6 @@
 [package]
-name = "nightshade-install"
-description = "Nightshade OS disk installer"
+name = "nightshade-installer"
+description = "Nightshade disk installer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ authors.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "nightshade-install"
+name = "nightshade-installer"
 path = "src/main.rs"
 
 # No dependencies on purpose.

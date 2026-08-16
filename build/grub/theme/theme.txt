@@ -1,4 +1,4 @@
-# Nightshade OS GRUB theme.
+# Nightshade GRUB theme.
 #
 # Flat #161226 field, the Nightshade lockup centred above the menu, cool
 # off-white menu text with a muted violet selection. No generated artwork: the
@@ -91,7 +91,7 @@ terminal-height: "84%"
 
 + label {
     id     = "hint"
-    text   = "Enter  boot        E  edit        C  console"
+    text   = "Enter  Boot        E  Edit        C  Console"
     left   = 0
     top    = 88%
     width  = 100%

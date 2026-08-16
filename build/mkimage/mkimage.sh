@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# mkimage.sh — build a Nightshade OS live/installer ISO from scratch.
+# mkimage.sh — build a Nightshade live/installer ISO from scratch.
 #
 # debootstrap -> chroot hooks -> squashfs -> xorriso. No live-build: every step
 # is visible here, which is the point. UEFI only; there is no BIOS/isolinux
@@ -46,7 +46,7 @@ options:
   -w DIR         work directory (default: $WORKDIR)
                  must be a native Linux filesystem: a 9p/drvfs mount such as
                  WSL's /mnt/c cannot hold a rootfs (no device nodes, no owners)
-  -b PATH        nightshade-install binary to embed (default: auto-detect from
+  -b PATH        nightshade-installer binary to embed (default: auto-detect from
                  target/release, or omit and the live session drops to a shell)
   -c DIR         apt archive cache directory, reused across builds (CI)
   -m URL         Debian mirror (default: $MIRROR)
@@ -218,8 +218,8 @@ AVAIL_MB=$(df -Pm "$WORKDIR" | awk 'NR==2 {print $4}')
 # Auto-detect the installer binary if one was not named explicitly.
 if [ -z "$INSTALLER_BIN" ]; then
     for candidate in \
-        "$BUILD_DIR/../target/release/nightshade-install" \
-        "$BUILD_DIR/../target/x86_64-unknown-linux-gnu/release/nightshade-install"; do
+        "$BUILD_DIR/../target/release/nightshade-installer" \
+        "$BUILD_DIR/../target/x86_64-unknown-linux-gnu/release/nightshade-installer"; do
         if [ -x "$candidate" ]; then
             INSTALLER_BIN="$candidate"
             break
@@ -301,7 +301,7 @@ cp -a "$BUILD_DIR/grub"        "$STAGING/grub"
 cp    "$HERE/packages.list"       "$STAGING/packages.list"
 cp    "$HERE/packages-live.list"  "$STAGING/packages-live.list"
 cp    "$HERE/packages-build.list" "$STAGING/packages-build.list"
-[ -n "$INSTALLER_BIN" ] && install -m 0755 "$INSTALLER_BIN" "$STAGING/bin/nightshade-install"
+[ -n "$INSTALLER_BIN" ] && install -m 0755 "$INSTALLER_BIN" "$STAGING/bin/nightshade-installer"
 
 cat >"$STAGING/build.env" <<EOF
 VERSION='$VERSION'
@@ -389,8 +389,8 @@ if [ "$REUSE_ROOTFS" -eq 1 ]; then
     # The installer binary is the one thing that actually changes between
     # iterations, so refresh it in place rather than re-running the hooks.
     if [ -n "$INSTALLER_BIN" ]; then
-        info "refreshing /usr/local/bin/nightshade-install"
-        install -m 0755 "$INSTALLER_BIN" "$ROOTFS/usr/local/bin/nightshade-install"
+        info "refreshing /usr/local/bin/nightshade-installer"
+        install -m 0755 "$INSTALLER_BIN" "$ROOTFS/usr/local/bin/nightshade-installer"
     fi
     KVER="$(cat "$OUTDIR/kver")"
 else
@@ -410,9 +410,9 @@ fi
 # the build runs anywhere other than a debian:trixie container -- the binary
 # links fine and then dies at runtime with a version-symbol error, on a console
 # with nothing else on it. Prove it executes now instead.
-if [ -x "$ROOTFS/usr/local/bin/nightshade-install" ]; then
+if [ -x "$ROOTFS/usr/local/bin/nightshade-installer" ]; then
     step "verifying the installer runs inside the image"
-    if ! chroot "$ROOTFS" /usr/local/bin/nightshade-install --version; then
+    if ! chroot "$ROOTFS" /usr/local/bin/nightshade-installer --version; then
         die "the installer binary does not run inside the image.
   It was almost certainly built against a newer glibc than Debian $SUITE ships.
   Build it in a debian:$SUITE container (as CI does), or statically."
@@ -426,6 +426,15 @@ step "compressing rootfs to squashfs"
 # be both enormous and wrong.
 assert_nothing_mounted_under "$ROOTFS"
 
+# Start the ISO tree from scratch every run.
+#
+# Reusing it -- which -r does, and so does any repeat run against the same work
+# directory -- leaves stale files behind. Two ways that bites: a kernel from a
+# previous build lingering under its old version, and `cp -a src dst` nesting
+# the theme at themes/nightshade/theme/ instead of replacing it, because cp
+# copies INTO an existing directory. The second one is silent: the ISO builds,
+# boots, and shows the previous build's theme.
+rm -rf "$ISOTREE"
 mkdir -p "$ISOTREE/live"
 SQUASH_ARGS=(
     -comp zstd -Xcompression-level 19
@@ -472,7 +481,7 @@ sed -e "s|@VERSION@|$VERSION|g" \
     "$BUILD_DIR/grub/grub.cfg.in" >"$ISOTREE/boot/grub/grub.cfg"
 
 mkdir -p "$ISOTREE/.disk"
-printf 'Nightshade OS %s (%s) %s\n' "$VERSION" "$BUILD_ID" "$ARCH" >"$ISOTREE/.disk/info"
+printf 'Nightshade %s (%s) %s\n' "$VERSION" "$BUILD_ID" "$ARCH" >"$ISOTREE/.disk/info"
 cp "$OUTDIR/packages-installed.txt" "$ISOTREE/.disk/packages.txt"
 
 # ---------------------------------------------------------------------------
@@ -531,7 +540,7 @@ sha256sum "$OUTPUT" >"$OUTPUT.sha256"
 # has nowhere to read it from otherwise.
 cp "$OUTDIR/packages-installed.txt" "$OUTPUT.packages.txt"
 
-printf '\n\033[1;32m==>\033[0m \033[1mNightshade OS %s\033[0m\n' "$VERSION" >&2
+printf '\n\033[1;32m==>\033[0m \033[1mNightshade %s\033[0m\n' "$VERSION" >&2
 info "iso       $OUTPUT (${ISO_MB}M)"
 info "sha256    $(cut -d' ' -f1 <"$OUTPUT.sha256")"
 info "packages  $OUTPUT.packages.txt ($(wc -l <"$OUTPUT.packages.txt") packages)"

@@ -252,7 +252,7 @@ fn preflight() -> Result<()> {
 
     if !is_root() {
         return Err(Error::env(
-            "The installer must run as root. Try: sudo nightshade-install",
+            "The installer must run as root. Try: sudo nightshade-installer",
         ));
     }
 

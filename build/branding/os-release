@@ -1,10 +1,10 @@
-# Nightshade OS release identification.
+# Nightshade release identification.
 # Installed to /etc/os-release (with /usr/lib/os-release as the canonical file).
 # @VERSION@ and @BUILD_ID@ are substituted by mkimage.sh at build time.
-NAME="Nightshade OS"
+NAME="Nightshade"
 ID=nightshade
 ID_LIKE=debian
-PRETTY_NAME="Nightshade OS @VERSION@"
+PRETTY_NAME="Nightshade @VERSION@"
 VERSION="@VERSION@"
 VERSION_ID="@VERSION@"
 VERSION_CODENAME=nightshade

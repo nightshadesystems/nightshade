@@ -159,10 +159,10 @@ fn chrome(f: &mut ratatui::Frame, heading: &str, keys: &str) -> Rect {
     let header = Paragraph::new(vec![
         Line::from(vec![
             Span::styled(
-                "  Nightshade OS",
+                "  Nightshade",
                 Style::default().fg(VIOLET).add_modifier(Modifier::BOLD),
             ),
-            Span::styled("  installer", Style::default().fg(DIM)),
+            Span::styled("  Installer", Style::default().fg(DIM)),
         ]),
         Line::from(Span::styled(
             format!("  {heading}"),
@@ -266,7 +266,7 @@ impl Frontend for TuiFrontend {
     fn welcome(&mut self) -> Result<()> {
         loop {
             self.draw(|f| {
-                let area = chrome(f, "Welcome", "Enter  continue        Esc  quit");
+                let area = chrome(f, "Welcome", "Enter  Continue        Esc  Quit");
                 let mut lines = vec![blank()];
                 for l in text::WELCOME_WARNING.lines() {
                     lines.push(if l.contains("DESTRUCTIVE") {
@@ -333,7 +333,7 @@ impl Frontend for TuiFrontend {
                 let area = chrome(
                     f,
                     "Select installation target",
-                    "up/down  move    Space  select    Enter  confirm    Esc  quit",
+                    "Up/Down  Move    Space  Select    Enter  Confirm    Esc  Quit",
                 );
                 let mut lines = vec![blank()];
                 lines.extend(rows.clone());
@@ -382,7 +382,7 @@ impl Frontend for TuiFrontend {
         loop {
             let msg = message.clone();
             self.draw(|f| {
-                let area = chrome(f, "Check this", "Enter  continue anyway        Esc  go back");
+                let area = chrome(f, "Check this", "Enter  Continue anyway        Esc  Go back");
                 let mut lines = vec![blank()];
                 for l in msg.lines() {
                     lines.push(coloured(format!("  {l}"), WARN));
@@ -443,7 +443,7 @@ impl Frontend for TuiFrontend {
                 true,
             );
             self.draw(|f| {
-                let area = chrome(f, "Confirm destruction", "Enter  confirm        Esc  cancel");
+                let area = chrome(f, "Confirm destruction", "Enter  Confirm        Esc  Cancel");
                 let mut lines = summary;
                 lines.push(f_line);
                 if let Some(e) = &err {
@@ -488,7 +488,7 @@ impl Frontend for TuiFrontend {
                 let area = chrome(
                     f,
                     "Administrator account",
-                    "Tab  switch field        Enter  confirm        Esc  quit",
+                    "Tab  Switch field        Enter  Confirm        Esc  Quit",
                 );
                 let mut lines = vec![blank(), plain(format!("  Account: {u}")), blank()];
                 for l in text::PASSWORD_HELP.lines() {
@@ -496,7 +496,7 @@ impl Frontend for TuiFrontend {
                 }
                 lines.push(blank());
                 lines.push(dim(format!(
-                    "  At least {} characters. Required — there is no way past this screen.",
+                    "  At least {} characters. Required - there is no way past this screen.",
                     validate::MIN_PASSWORD_LEN
                 )));
                 lines.push(blank());
@@ -556,7 +556,7 @@ impl Frontend for TuiFrontend {
             let d = default.clone();
             let line = field.render("Hostname:  ", true);
             self.draw(|f| {
-                let area = chrome(f, "Hostname", "Enter  confirm        Esc  quit");
+                let area = chrome(f, "Hostname", "Enter  Confirm        Esc  Quit");
                 let mut lines = vec![
                     blank(),
                     dim(format!("  Default: {d}")),
@@ -626,7 +626,7 @@ impl Frontend for TuiFrontend {
         loop {
             let lines = lines.clone();
             self.draw(|f| {
-                let area = chrome(f, "Summary", "Enter  install        Esc  cancel");
+                let area = chrome(f, "Summary", "Enter  Install        Esc  Cancel");
                 body(f, area, lines);
             })?;
 
@@ -657,7 +657,9 @@ impl Frontend for TuiFrontend {
 
         // A draw failure here must not abort an install that is otherwise fine.
         let _ = self.terminal.draw(|f| {
-            let area = chrome(f, "Installing", "please wait — do not power off");
+            // Plain hyphen, not an em dash: the Linux console font has no glyph
+            // for U+2014 and draws a box instead.
+            let area = chrome(f, "Installing", "Please wait - do not power off");
             let rows = Layout::default()
                 .direction(Direction::Vertical)
                 .constraints([Constraint::Length(3), Constraint::Min(3)])
@@ -700,7 +702,7 @@ impl Frontend for TuiFrontend {
                 let area = chrome(
                     f,
                     "Installation failed",
-                    "up/down  scroll        Enter  continue",
+                    "Up/Down  Scroll        Enter  Continue",
                 );
                 let mut lines = vec![blank(), coloured(format!("  {summary}"), DANGER), blank()];
                 for l in detail.lines().skip(offset) {
@@ -740,11 +742,11 @@ impl Frontend for TuiFrontend {
                 let area = chrome(
                     f,
                     "Installation complete",
-                    "left/right  choose        Enter  confirm",
+                    "Left/Right  Choose        Enter  Confirm",
                 );
                 let mut lines = vec![
                     blank(),
-                    coloured("  Nightshade OS has been installed.", OK),
+                    coloured("  Nightshade has been installed.", OK),
                     blank(),
                     plain("  Remove the installation medium before rebooting."),
                     dim("  Log copied to /var/log/nightshade-install.log on the new system."),

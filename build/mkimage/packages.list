@@ -1,4 +1,4 @@
-# Nightshade OS target rootfs package manifest.
+# Nightshade target rootfs package manifest.
 #
 # This is the EXPLICIT package set for the installed system. Every package that
 # ends up in the image is either listed here or pulled in as a hard Depends of

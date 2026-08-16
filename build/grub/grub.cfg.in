@@ -1,4 +1,4 @@
-# Nightshade OS — ISO boot menu.
+# Nightshade — ISO boot menu.
 #
 # Rendered by mkimage.sh (@VERSION@ / @LABEL@ substituted) into
 # /boot/grub/grub.cfg on the ISO. The installed system does NOT use this file:
@@ -54,12 +54,12 @@ set timeout_style=menu
 #                                  the one systemd talks to on a headless box
 set nsargs="boot=live live-config.nocomponents noeject noprompt console=tty0 console=ttyS0,115200n8"
 
-menuentry "Install Nightshade OS" --class nightshade {
+menuentry "Install Nightshade" --class nightshade {
     linux /live/vmlinuz $nsargs quiet loglevel=3
     initrd /live/initrd.img
 }
 
-menuentry "Install Nightshade OS (safe graphics / nomodeset)" --class nightshade {
+menuentry "Install Nightshade (safe graphics / nomodeset)" --class nightshade {
     # Doubles as the debug entry: no `quiet`, so the full boot log is on screen
     # and on serial when the default entry fails somewhere unhelpful.
     linux /live/vmlinuz $nsargs nomodeset

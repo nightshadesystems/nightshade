@@ -10,9 +10,9 @@
 mkdir -p /usr/share/nightshade /usr/local/bin
 
 # --- installer binary -----------------------------------------------------
-if [ -x "$STAGING/bin/nightshade-install" ]; then
-    log "installing nightshade-install binary"
-    install -m 0755 "$STAGING/bin/nightshade-install" /usr/local/bin/nightshade-install
+if [ -x "$STAGING/bin/nightshade-installer" ]; then
+    log "installing nightshade-installer binary"
+    install -m 0755 "$STAGING/bin/nightshade-installer" /usr/local/bin/nightshade-installer
 else
     # Milestone 1 builds the ISO before the Rust crate exists. The live session
     # must still come up so the pipeline itself can be tested; it drops to a
@@ -27,7 +27,7 @@ cat >/usr/local/bin/nightshade-live-session <<'EOF'
 # Runs the installer on the live console, then always leaves the operator with
 # a usable shell instead of a dead tty.
 
-INSTALLER=/usr/local/bin/nightshade-install
+INSTALLER=/usr/local/bin/nightshade-installer
 
 printf '\n'
 if [ -x "$INSTALLER" ]; then
@@ -47,7 +47,7 @@ fi
 
 printf '\n'
 printf '  Dropping to a root shell on the live system.\n'
-printf '  Relaunch the installer at any time with:  nightshade-install\n'
+printf '  Relaunch the installer at any time with:  nightshade-installer\n'
 printf '\n'
 
 # The installer turns terminal echo off while a password is typed and restores
@@ -63,7 +63,7 @@ chmod 0755 /usr/local/bin/nightshade-live-session
 log "installing nightshade-installer.service"
 cat >/etc/systemd/system/nightshade-installer.service <<'EOF'
 [Unit]
-Description=Nightshade OS installer (live session)
+Description=Nightshade installer (live session)
 # Take tty1 away from the normal getty rather than racing it for the console.
 Conflicts=getty@tty1.service
 After=getty@tty1.service systemd-user-sessions.service
@@ -117,7 +117,7 @@ path /etc/systemd/system/nightshade-installer.service
 path /etc/systemd/system/multi-user.target.wants/nightshade-installer.service
 path /etc/systemd/system/serial-getty@ttyS0.service.d/autologin.conf
 path /usr/local/bin/nightshade-live-session
-path /usr/local/bin/nightshade-install
+path /usr/local/bin/nightshade-installer
 path /usr/share/nightshade/live-manifest
 EOF
 

@@ -1,4 +1,4 @@
-# Nightshade OS
+# Nightshade
 
 A minimal Debian 13 (trixie) based firewall operating system, built from
 scratch: a reproducible live ISO pipeline, a branded GRUB, and a Rust installer
@@ -26,7 +26,7 @@ build/
     default-grub.in /etc/default/grub for the installed system
   branding/         os-release, issue, motd
 src/
-  installer/        Rust crate: nightshade-install
+  nightshade-installer/   Rust crate: the installer
 ```
 
 ---
@@ -181,7 +181,7 @@ delete the pin, reinstall `zfs-dkms`, `linux-headers-amd64` and
 ## The live environment
 
 The ISO boots to tty1, auto-logs in as root and launches
-`/usr/local/bin/nightshade-install` from `nightshade-installer.service`. If the
+`/usr/local/bin/nightshade-installer` from `nightshade-installer.service`. If the
 installer exits — for any reason — the session prints how to relaunch it and
 drops to a root shell rather than leaving a dead console.
 
@@ -198,7 +198,7 @@ creates those files.
 
 ## The installer
 
-`src/installer/` — a zero-dependency Rust crate. The engine
+`src/nightshade-installer/` — a zero-dependency Rust crate. The engine
 (`engine/`) owns the flow and every destructive action; frontends (`ui/`) only
 ask questions and draw. That split is what lets the plain line-based flow and
 the TUI be genuinely interchangeable.

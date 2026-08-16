@@ -1,4 +1,4 @@
-//! nightshade-install -- the Nightshade OS disk installer.
+//! nightshade-installer -- the Nightshade disk installer.
 //!
 //! Structure: `engine` owns the flow and every destructive action, `ui` owns
 //! presentation. The engine talks to a `Frontend` trait, so the plain
@@ -29,13 +29,13 @@ fn main() -> ExitCode {
         return ExitCode::SUCCESS;
     }
     if args.version {
-        println!("nightshade-install {}", env!("CARGO_PKG_VERSION"));
+        println!("nightshade-installer {}", env!("CARGO_PKG_VERSION"));
         return ExitCode::SUCCESS;
     }
 
     logging::init(&args.log_path);
     logging::info(format!(
-        "nightshade-install {} starting",
+        "nightshade-installer {} starting",
         env!("CARGO_PKG_VERSION")
     ));
     if !logging::is_active() {
@@ -70,7 +70,7 @@ fn main() -> ExitCode {
             logging::error(format!("exiting with failure: {e}"));
             // The frontend has already rendered the detail; this is for
             // anything scraping stderr.
-            eprintln!("nightshade-install: {e}");
+            eprintln!("nightshade-installer: {e}");
             ExitCode::FAILURE
         }
     }
@@ -154,7 +154,7 @@ impl Args {
                     }
                 }
                 other => {
-                    eprintln!("nightshade-install: unknown argument: {other}");
+                    eprintln!("nightshade-installer: unknown argument: {other}");
                     args.help = true;
                 }
             }
@@ -167,12 +167,12 @@ impl Args {
 fn print_help() {
     println!(
         "\
-nightshade-install {version}
+nightshade-installer {version}
 
-Installs Nightshade OS to disk with ZFS, optionally as a two-disk RAID1 mirror.
+Installs Nightshade to disk with ZFS, optionally as a two-disk RAID1 mirror.
 Must be run as root from the Nightshade live medium.
 
-usage: nightshade-install [options]
+usage: nightshade-installer [options]
 
 options:
   --plain         force the line-based frontend (the default on a serial

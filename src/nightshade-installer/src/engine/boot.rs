@@ -143,6 +143,35 @@ pub fn configure_grub() -> Result<()> {
             .arg(format!("{fonts_src}/."))
             .arg(&theme_dst)
             .run()?;
+
+        // AND into /boot/grub/fonts. This second copy is what actually makes
+        // the theme appear.
+        //
+        // grub-mkconfig wraps its whole gfxterm setup in:
+        //
+        //     if loadfont $font ; then
+        //         set gfxmode=... ; load_video ; insmod gfxterm
+        //     fi
+        //
+        // where $font is /boot/grub/fonts/unicode.pf2. Fonts in the theme
+        // directory are loaded later and do not satisfy it. If that one font is
+        // missing the guard fails, gfxterm is never initialised, and GRUB falls
+        // back to the plain blue text menu -- silently, with a perfectly valid
+        // theme sitting on disk that nothing ever reads.
+        let boot_fonts = format!("{TARGET}/boot/grub/fonts");
+        fs::create_dir_all(&boot_fonts).ctx(format!("creating {boot_fonts}"))?;
+        Cmd::new("cp")
+            .arg("-a")
+            .arg(format!("{fonts_src}/."))
+            .arg(&boot_fonts)
+            .run()?;
+
+        if !Path::new(&format!("{boot_fonts}/unicode.pf2")).exists() {
+            return Err(Error::env(
+                "unicode.pf2 is missing from /boot/grub/fonts; the installed \
+                 system would boot to an unthemed GRUB",
+            ));
+        }
     }
 
     if !Path::new(&format!("{theme_dst}/theme.txt")).exists() {
@@ -276,7 +305,7 @@ pub fn install_esp_sync(esps: &[Esp], step: &mut Stepper) -> Result<()> {
         r#"#!/bin/sh
 # Mirror the primary EFI system partition onto the secondary.
 #
-# Installed by nightshade-install for mirrored (two-disk) systems. Triggered by
+# Installed by nightshade-installer for mirrored (two-disk) systems. Triggered by
 # nightshade-sync-esp.path whenever /boot/efi changes, and once at boot to catch
 # drift from any period when the second disk was absent.
 set -eu

@@ -78,7 +78,7 @@ Priority: optional
 Maintainer: Nightshade Systems <noreply@quartz.systems>
 Provides: zfs-modules
 Depends: linux-image-$KVER
-Description: Prebuilt OpenZFS kernel modules for Nightshade OS
+Description: Prebuilt OpenZFS kernel modules for Nightshade
  OpenZFS modules compiled against $KVER during the Nightshade image build.
  .
  Nightshade ships no compiler and no DKMS: the modules are built once, in the

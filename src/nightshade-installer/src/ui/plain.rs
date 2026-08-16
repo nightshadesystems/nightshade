@@ -330,7 +330,7 @@ impl Frontend for PlainFrontend {
 
     fn finished(&mut self, log_path: &Path) -> Result<FinalAction> {
         self.heading("Installation complete");
-        println!("  Nightshade OS has been installed.");
+        println!("  Nightshade has been installed.");
         println!();
         println!("  Remove the installation medium before rebooting.");
         println!("  Log copied to /var/log/nightshade-install.log on the new system.");

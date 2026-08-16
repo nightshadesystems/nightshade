@@ -1,4 +1,4 @@
-# Nightshade OS build entrypoints.
+# Nightshade build entrypoints.
 #
 # Everything here assumes a Linux host. On Windows, drive it through WSL:
 #   wsl -d Ubuntu -u root make iso
@@ -52,7 +52,7 @@ APT_CACHE    ?=
 # cargo target dir on /mnt/c is dramatically slower than one on ext4.
 CARGO_TARGET_DIR ?= target
 export CARGO_TARGET_DIR
-INSTALLER    := $(CARGO_TARGET_DIR)/release/nightshade-install
+INSTALLER    := $(CARGO_TARGET_DIR)/release/nightshade-installer
 
 # VM settings
 VM_MEM       ?= 4096
@@ -91,7 +91,7 @@ endif
 all: iso
 
 help:
-	@echo "Nightshade OS $(VERSION)"
+	@echo "Nightshade $(VERSION)"
 	@echo
 	@echo "  make installer        build the Rust installer (release)"
 	@echo "  make iso              build $(ISO)"

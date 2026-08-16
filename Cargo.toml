@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["src/installer"]
+members = ["src/nightshade-installer"]
 
 [workspace.package]
 version = "0.1.0"

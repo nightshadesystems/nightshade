@@ -79,10 +79,10 @@ pub trait Frontend {
 
 /// Shared text so both frontends say the same thing.
 pub mod text {
-    pub const TITLE: &str = "Nightshade OS installer";
+    pub const TITLE: &str = "Nightshade Installer";
 
     pub const WELCOME_WARNING: &str = "\
-This installs Nightshade OS on this machine.
+This installs Nightshade on this machine.
 
 Installation is DESTRUCTIVE. Every disk you select will be erased
 completely: existing partitions, filesystems and data are lost, and

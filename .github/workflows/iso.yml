@@ -100,7 +100,7 @@ jobs:
           cargo_version="$(sed -n 's/^version *= *"\(.*\)"/\1/p' Cargo.toml | head -1)"
           if [ "$cargo_version" != "$version" ]; then
             echo "::warning::VERSION is $version but Cargo.toml says $cargo_version;" \
-                 "nightshade-install --version will disagree with the ISO."
+                 "nightshade-installer --version will disagree with the ISO."
           fi
 
           {
@@ -153,13 +153,13 @@ jobs:
             -v "${{ steps.version.outputs.version }}" \
             -w "$WORKDIR" \
             -c "$APT_CACHE" \
-            -b target/release/nightshade-install
+            -b target/release/nightshade-installer
 
       - name: Summarise
         run: |
           set -euo pipefail
           {
-            echo "### Nightshade OS ${{ steps.version.outputs.version }}"
+            echo "### Nightshade ${{ steps.version.outputs.version }}"
             echo
             echo '```'
             ls -lh dist/

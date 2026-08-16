@@ -46,7 +46,7 @@ pub fn bind_pseudo_filesystems() -> Result<Vec<String>> {
 /// truth for the same thing.
 pub fn write_fstab(esps: &[Esp]) -> Result<()> {
     let mut fstab = String::from(
-        "# /etc/fstab -- Nightshade OS\n\
+        "# /etc/fstab -- Nightshade\n\
          #\n\
          # ZFS datasets are not listed here. They are mounted from their own\n\
          # mountpoint properties by zfs-mount.service after zfs-import-cache\n\
