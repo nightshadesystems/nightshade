@@ -130,11 +130,15 @@ jobs:
           restore-keys: |
             nightshade-cargo-
 
-      - name: Test the installer
-        run: cargo test --release --locked
+      # The whole workspace, in the dev profile. The release profile exists to
+      # make the shipped binaries small; tests do not care, and LTO across
+      # every crate on each push is minutes of runner time for nothing.
+      - name: Test the workspace
+        run: cargo test --workspace --locked
 
+      # Scoped: only the installer goes into the ISO in this phase.
       - name: Build the installer
-        run: cargo build --release --locked
+        run: cargo build --release --locked -p nightshade-installer
 
       - name: Build the ISO
         env:

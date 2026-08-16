@@ -108,8 +108,12 @@ help:
 # installer
 # ---------------------------------------------------------------------------
 
+# Scoped to the one crate on purpose. The workspace now also holds configd, the
+# CLI and their dependency trees; building all of it under the release profile
+# (LTO, one codegen unit) to produce a binary the ISO does not yet contain adds
+# minutes to every `make iso`.
 installer:
-	cargo build --release --locked
+	cargo build --release --locked -p nightshade-installer
 	@ls -l $(INSTALLER)
 
 $(INSTALLER): installer
@@ -184,10 +188,16 @@ vm-reset:
 # housekeeping
 # ---------------------------------------------------------------------------
 
+# The whole workspace, and in the dev profile. The release profile's LTO and
+# single codegen unit exist to make the shipped binaries small, which is not a
+# property tests measure -- paying for it on every test run buys nothing.
 .PHONY: test
 test:
-	cargo test --release
+	cargo test --workspace --locked
 
+# Named build products rather than the whole of dist/: dist/systemd and
+# dist/completions are source, not output.
 clean:
-	rm -rf $(DIST) $(CARGO_TARGET_DIR)
+	rm -f $(DIST)/*.iso $(DIST)/*.iso.sha256 $(DIST)/*.iso.packages.txt
+	rm -rf $(CARGO_TARGET_DIR)
 	$(SUDO) rm -rf $(WORKDIR)

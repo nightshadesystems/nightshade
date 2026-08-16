@@ -1,0 +1,13 @@
+[package]
+name = "nightshade-common"
+description = "Filesystem layout, shared constants and logging for Nightshade"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Nothing yet. This crate is depended on by everything else, so a dependency
+# added here is a dependency in the CLI's login-shell binary as much as in the
+# daemon. Keep that in mind before adding one.
+[dependencies]

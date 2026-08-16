@@ -1,0 +1,14 @@
+[package]
+name = "nightshade-cli"
+description = "The Nightshade operator CLI"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The `ns` binary target (with a `nightshade` symlink alongside it) arrives
+# with the CLI itself. Declaring it now would mean shipping a login shell that
+# does nothing, and this is the one binary in the workspace that gets set as
+# somebody's login shell.
+[dependencies]

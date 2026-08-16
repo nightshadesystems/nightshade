@@ -1,0 +1,14 @@
+[package]
+name = "nightshade-configd"
+description = "The Nightshade configuration daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# The `nightshade-configd` binary target arrives with the daemon itself. There
+# is nothing yet for a `main` to do that is not a stub, and a stub that prints
+# its own name is worse than an absent target: it builds, it installs, and it
+# looks like something works.
+[dependencies]

@@ -1,6 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["src/nightshade-installer"]
+# A glob rather than a list. Every Nightshade crate lives directly under src/
+# and carries the nightshade- prefix; adding one should not also require
+# remembering to edit this file. A stray non-crate directory under src/ will
+# fail the build loudly, which is the behaviour we want.
+members = ["src/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,6 +13,77 @@ license = "MIT"
 authors = ["Nightshade Systems"]
 repository = "https://github.com/zagdrath/nightshade"
 
+# One version of each dependency across the whole workspace. configd and the
+# CLI exchange serde types over a socket, so a version skew between them is a
+# wire-format skew, not just a duplicate in the lockfile.
+#
+# The list is deliberately short. This is a firewall appliance running a daemon
+# as root; every crate here is one whose source someone has to be willing to
+# read.
+[workspace.dependencies]
+nightshade-common = { path = "src/nightshade-common" }
+nightshade-proto = { path = "src/nightshade-proto" }
+nightshade-schema = { path = "src/nightshade-schema" }
+nightshade-render = { path = "src/nightshade-render" }
+
+# configd only. The CLI is synchronous -- a line editor waiting on a human has
+# nothing to overlap -- and pulling tokio into it would double the binary that
+# every login shell execs.
+tokio = { version = "1.53", default-features = false }
+# `tracing` on its own produces no output; a subscriber has to consume it.
+# journald natively rather than free text on stderr, because the commit log is
+# an audit trail -- `journalctl NIGHTSHADE_ACTOR=1000` is worth having, and it
+# only works if the actor is a field rather than a word inside a sentence.
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tracing-journald = "0.3"
+
+serde = { version = "1.0", features = ["derive"] }
+# JSON is the internal serialisation (running.json, session files) and the
+# interchange/display format. It is never the canonical on-disk config: that is
+# config.boot, in curly-brace format, parsed by nightshade-schema.
+serde_json = "1.0"
+# serde_yaml_ng, not serde_yaml: upstream serde_yaml was archived in 2024 and
+# its last release is literally versioned `0.9.34+deprecated`. This is the
+# maintained continuation, same API. Only ever parses our own schema/ files --
+# operator input goes through the curly-brace parser, which is ours.
+serde_yaml_ng = "0.10"
+
+# CBOR over the unix socket rather than postcard. Both are small; ciborium is
+# self-describing, which means a newer CLI talking to an older configd fails on
+# a named field instead of silently misreading a positional one, and it leaves
+# room to add request variants without a lockstep upgrade. That property is
+# what makes a later API frontend additive rather than a protocol break.
+ciborium = "0.2"
+
+reedline = "0.50"
+regex = "1.13"
+# SO_PEERCRED, unix credentials, group lookup.
+nix = { version = "0.31", default-features = false }
+tempfile = "3"
+# thiserror everywhere, anyhow nowhere. Errors that cross a crate boundary or
+# reach an operator are enumerated types; "something went wrong" with a
+# backtrace is not an error message you can act on at 2am.
+thiserror = "2"
+
+# Archive entries are <seq>-<timestamp>.boot.gz.
+flate2 = "1.1"
+
+# jiff rather than the `time` crate, because it does two jobs here. One is
+# formatting archive timestamps and commit-log entries. The other is validating
+# `system time-zone`, which means resolving a name against the tzdata on the
+# box; jiff reads /usr/share/zoneinfo (and a compiled tzdb where that is what
+# exists) and `time` would need a second crate for it.
+jiff = "0.2"
+
+# Test-only, but declared here so a crate cannot pin its own version of the
+# thing that decides whether the config format round-trips.
+proptest = "1.11"
+# Structured input for the fuzz targets. The targets themselves live in fuzz/,
+# outside this workspace, because libfuzzer-sys needs a nightly toolchain and
+# should not be able to break a stable `cargo build --workspace`.
+arbitrary = { version = "1.4", features = ["derive"] }
+
 [profile.release]
 # The installer ships inside the live image, where every megabyte is squashfs
 # the operator waits on. None of this costs anything that matters for a program
@@ -16,5 +91,13 @@ repository = "https://github.com/zagdrath/nightshade"
 opt-level = "s"
 lto = true
 codegen-units = 1
+# Abort applies to configd too, and that is the right posture for it rather
+# than an inherited accident. A panic in a root daemon means an invariant it
+# was holding is already false; unwinding past that and carrying on serving
+# other sessions is how a half-applied config gets promoted to running. Dying
+# and letting systemd restart is safe here because every piece of state configd
+# must not lose is already on disk -- sessions under /run, running.json, the
+# pending-confirm marker -- and recovering them on startup is a requirement the
+# commit-confirm design imposes anyway.
 panic = "abort"
 strip = true

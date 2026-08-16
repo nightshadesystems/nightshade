@@ -1,5 +1,13 @@
 /target/
-/dist/
+
+# dist/ is where built ISOs land, but it is also where the packaging assets
+# that go *into* an image live -- systemd units, shell completions. So ignore
+# the contents rather than the directory, and re-include the parts that are
+# source. `make clean` removes the build products by name for the same reason.
+/dist/*
+!/dist/systemd/
+!/dist/completions/
+
 *.iso
 *.iso.sha256
 *.iso.packages.txt
