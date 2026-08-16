@@ -1,0 +1,13 @@
+# The build scripts run inside a Linux chroot. A CRLF checkout on Windows turns
+# every hook into "bad interpreter: /bin/sh^M", so pin line endings explicitly
+# rather than relying on each developer's core.autocrlf.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+Makefile text eol=lf
+
+*.png   binary
+*.pf2   binary
+*.iso   binary
+*.img   binary
+*.qcow2 binary

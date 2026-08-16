@@ -1,0 +1,153 @@
+name: iso
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+# A queued second run would fight the first for the same cache key.
+concurrency:
+  group: iso-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    # The ISO is built inside the same Debian release it targets. That is not
+    # just tidiness: the installer binary is compiled here and has to run inside
+    # the image, so it must link against trixie's glibc and not the runner's
+    # newer one. mkimage.sh enforces this with a gate that executes the binary
+    # inside the chroot, and that gate is what fails if this is ever built
+    # somewhere else.
+    container:
+      image: debian:trixie
+      # debootstrap creates device nodes with mknod, and the build bind-mounts
+      # /proc, /sys and /dev into the chroot. Neither works in a default
+      # container. --privileged is the coarse-but-reliable way to get both on a
+      # hosted runner; a finer-grained equivalent is
+      #   --cap-add=SYS_ADMIN --cap-add=MKNOD --security-opt apparmor=unconfined
+      # which also works but is more likely to break as runner images change.
+      #
+      # Note there is no loop-device requirement: the ESP image is built with
+      # mtools and the squashfs with mksquashfs, both of which work on plain
+      # files.
+      options: --privileged
+
+    env:
+      APT_CACHE: /tmp/nightshade-apt-cache
+      # Cargo on the default work directory is fine; the ISO work tree must be
+      # on a real filesystem, which it is inside the container.
+      WORKDIR: /tmp/nightshade-build
+
+    steps:
+      - name: Install build dependencies
+        run: |
+          set -euo pipefail
+          apt-get update -qq
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            debootstrap \
+            xorriso \
+            squashfs-tools \
+            zstd \
+            make \
+            git \
+            curl \
+            gcc \
+            libc6-dev
+          # actions/checkout wants git to trust the workspace it mounts.
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
+      - uses: actions/checkout@v4
+
+      - name: Install the Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Determine version
+        id: version
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            # v0.2.0 -> 0.2.0
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="0.1.0+$(echo "${GITHUB_SHA}" | cut -c1-8)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building version $version"
+
+      - name: Cache Debian packages
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.APT_CACHE }}
+          # The manifests decide what gets downloaded, so they decide the key.
+          key: nightshade-apt-${{ hashFiles('build/mkimage/packages*.list') }}
+          restore-keys: |
+            nightshade-apt-
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: nightshade-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            nightshade-cargo-
+
+      - name: Test the installer
+        run: cargo test --release --locked
+
+      - name: Build the installer
+        run: cargo build --release --locked
+
+      - name: Build the ISO
+        run: |
+          set -euo pipefail
+          mkdir -p "$APT_CACHE" dist
+          # SOURCE_DATE_EPOCH makes the squashfs and ISO timestamps
+          # deterministic; the commit date is the natural value for it.
+          SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
+          export SOURCE_DATE_EPOCH
+          build/mkimage/mkimage.sh \
+            -o "dist/nightshade-${{ steps.version.outputs.version }}-amd64.iso" \
+            -v "${{ steps.version.outputs.version }}" \
+            -w "$WORKDIR" \
+            -c "$APT_CACHE" \
+            -b target/release/nightshade-install
+
+      - name: Summarise
+        run: |
+          set -euo pipefail
+          {
+            echo "### Nightshade OS ${{ steps.version.outputs.version }}"
+            echo
+            echo '```'
+            ls -lh dist/
+            cat dist/*.sha256
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # Every run gets an artifact for inspection; only tags get a long
+      # retention, because untagged ISOs are ~283MB of throwaway.
+      - name: Upload the ISO
+        if: github.ref_type == 'tag'
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightshade-${{ steps.version.outputs.version }}-amd64
+          path: |
+            dist/*.iso
+            dist/*.sha256
+          retention-days: 90
+          compression-level: 0
+
+      - name: Upload the package manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-manifest-${{ steps.version.outputs.version }}
+          path: ${{ env.WORKDIR }}/out/packages-installed.txt
+          retention-days: 14
+          if-no-files-found: warn

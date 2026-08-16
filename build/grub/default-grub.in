@@ -1,0 +1,37 @@
+# /etc/default/grub for an INSTALLED Nightshade system.
+#
+# Written into the target by the installer, which then runs update-grub. The
+# ISO's menu is a different file (build/grub/grub.cfg.in) because the ISO boots
+# a squashfs and the installed system boots a ZFS dataset, and only the latter
+# needs grub-mkconfig to go probing for pools.
+#
+# @VERSION@ and @ROOT_DATASET@ are substituted by the installer.
+
+GRUB_DEFAULT=0
+GRUB_TIMEOUT=3
+GRUB_TIMEOUT_STYLE=menu
+GRUB_DISTRIBUTOR="Nightshade"
+
+GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3"
+# root= is normally emitted by grub-mkconfig from grub-probe, but grub-probe is
+# the single most fragile part of ZFS boot. Stating the dataset explicitly means
+# a probe failure produces a noisy GRUB rather than a kernel that panics with
+# "unable to mount root fs". 10_linux appends GRUB_CMDLINE_LINUX after its own
+# root=, so this value is the one the kernel sees.
+GRUB_CMDLINE_LINUX="root=ZFS=@ROOT_DATASET@ console=tty0 console=ttyS0,115200n8"
+
+# Serial mirrors the menu for headless/remote-hands access.
+GRUB_TERMINAL_INPUT="console serial"
+GRUB_TERMINAL_OUTPUT="gfxterm serial"
+GRUB_SERIAL_COMMAND="serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1"
+
+GRUB_GFXMODE=1024x768,800x600,auto
+GRUB_GFXPAYLOAD_LINUX=keep
+GRUB_THEME=/boot/grub/themes/nightshade/theme.txt
+
+# Appliance: there is nothing else on these disks worth offering to boot, and
+# os-prober on a ZFS mirror is slow and occasionally destructive.
+GRUB_DISABLE_OS_PROBER=true
+
+# GRUB must carry the ZFS reader in core.img to read /boot off bpool at all.
+GRUB_PRELOAD_MODULES="zfs part_gpt"

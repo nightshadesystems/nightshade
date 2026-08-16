@@ -1,0 +1,15 @@
+# Nightshade OS release identification.
+# Installed to /etc/os-release (with /usr/lib/os-release as the canonical file).
+# @VERSION@ and @BUILD_ID@ are substituted by mkimage.sh at build time.
+NAME="Nightshade OS"
+ID=nightshade
+ID_LIKE=debian
+PRETTY_NAME="Nightshade OS @VERSION@"
+VERSION="@VERSION@"
+VERSION_ID="@VERSION@"
+VERSION_CODENAME=nightshade
+BUILD_ID="@BUILD_ID@"
+HOME_URL="https://github.com/zagdrath/nightshade"
+SUPPORT_URL="https://github.com/zagdrath/nightshade/issues"
+BUG_REPORT_URL="https://github.com/zagdrath/nightshade/issues"
+ANSI_COLOR="0;35"

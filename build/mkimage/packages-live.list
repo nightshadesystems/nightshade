@@ -1,0 +1,16 @@
+# Packages present ONLY in the live/installer environment.
+#
+# The installer removes every package listed here from the target system during
+# installation (see the installer's live-package stripping step), so nothing in
+# this file may be a runtime dependency of the installed OS.
+
+# Boots the squashfs read-only root with an overlay. Pulls
+# live-boot-initramfs-tools as a hard Depends, which supplies the initramfs
+# hooks that find /live/filesystem.squashfs on the boot medium.
+live-boot
+
+# Shipped because the live toolchain expects it, but deliberately inert: the
+# kernel command line passes live-config.nocomponents so it never creates its
+# own user or fights nightshade-installer.service for tty1.
+live-config
+live-config-systemd

@@ -1,0 +1,22 @@
+# Build-time-only packages.
+#
+# These are installed into the chroot, used, and then purged by hook 0700
+# before the squashfs is made. They never reach the live environment or the
+# installed system. Because they are transient they are NOT part of the
+# packages.list manifest.
+
+# Compiles the ZFS DKMS module (hook 0300).
+build-essential
+
+# grub-mkfont needs real font files to render the theme's monospace .pf2.
+fonts-dejavu-core
+
+# pamscale, to pre-scale the logo to its final pixel size. GRUB's gfxmenu
+# ignores width/height on an image component and lays the bitmap out at its
+# natural size, so the asset has to arrive already the right size.
+netpbm
+
+# mformat/mcopy build the ISO's EFI system partition image without needing
+# loop devices, which keeps the ISO assembly step usable in an unprivileged
+# container.
+mtools

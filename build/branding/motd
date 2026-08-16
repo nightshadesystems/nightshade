@@ -1,0 +1,8 @@
+
+  Nightshade OS
+
+  A minimal Debian-based firewall appliance.
+  Root is locked; use sudo from the nightshade account.
+
+  docs: https://github.com/zagdrath/nightshade
+

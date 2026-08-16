@@ -1,0 +1,37 @@
+[package]
+name = "nightshade-install"
+description = "Nightshade OS disk installer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "nightshade-install"
+path = "src/main.rs"
+
+# No dependencies on purpose.
+#
+# The installer is the one program that has to work on a bare TTY, on a serial
+# console, in a live image with no network, at the exact moment the operator is
+# about to erase their disks. Everything it needs -- process spawning, /sys
+# parsing, terminal echo control via stty -- is in std or in the base image
+# already, so there is no dependency tree to audit or to break the build.
+#
+# The ratatui/crossterm TUI frontend is the one part that will add crates; it is
+# feature-gated so the plain frontend keeps building without them.
+[dependencies]
+# crossterm is used through ratatui's own re-export (ratatui::crossterm) rather
+# than as a separate dependency. Declaring it twice invites a version skew where
+# the crossterm types the frontend builds and the ones ratatui's backend expects
+# are different types with the same name, which produces spectacularly unhelpful
+# compiler errors.
+ratatui = { version = "0.30.2", optional = true }
+
+[features]
+default = ["tui"]
+# The full-screen frontend. Optional so a minimal recovery build can be produced
+# with no dependency tree at all -- the plain frontend is always compiled in and
+# is what runs on a serial console either way.
+tui = ["dep:ratatui"]

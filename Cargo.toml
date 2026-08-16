@@ -1,0 +1,20 @@
+[workspace]
+resolver = "3"
+members = ["src/installer"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Nightshade Systems"]
+repository = "https://github.com/zagdrath/nightshade"
+
+[profile.release]
+# The installer ships inside the live image, where every megabyte is squashfs
+# the operator waits on. None of this costs anything that matters for a program
+# that spends its life waiting on zpool.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

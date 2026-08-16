@@ -1,0 +1,54 @@
+# Nightshade OS target rootfs package manifest.
+#
+# This is the EXPLICIT package set for the installed system. Every package that
+# ends up in the image is either listed here or pulled in as a hard Depends of
+# something listed here. There are deliberately no metapackages (task-*,
+# standard, etc.) and recommends are disabled image-wide, so what you read here
+# is very close to what you get.
+#
+# Blank lines and #-comments are ignored. One package per line.
+
+# --- kernel and init ------------------------------------------------------
+linux-image-amd64
+systemd
+systemd-sysv
+udev
+kmod
+
+# --- ZFS ------------------------------------------------------------------
+# zfs-dkms and linux-headers-amd64 are needed only to compile the module inside
+# the build chroot; hook 0300 builds them, stashes the resulting .ko, then
+# purges the whole DKMS toolchain so the shipped image carries no compiler.
+# zfsutils-linux and zfs-initramfs stay.
+zfs-dkms
+zfsutils-linux
+zfs-initramfs
+linux-headers-amd64
+
+# --- boot -----------------------------------------------------------------
+# UEFI only for phase 1; no BIOS/isolinux path exists anywhere in this build.
+grub-efi-amd64
+efibootmgr
+dosfstools
+
+# --- installer tooling ----------------------------------------------------
+# sgdisk. The minbase set ships no GPT editor at all (no sfdisk, no parted), and
+# the installer drives sgdisk rather than reimplementing partitioning.
+gdisk
+
+# initramfs-tools is configured for zstd; without this binary it silently falls
+# back to gzip.
+zstd
+
+# --- base userland --------------------------------------------------------
+openssh-server
+sudo
+iproute2
+nftables
+ca-certificates
+less
+vim-tiny
+
+# --- localisation ---------------------------------------------------------
+# Needed to generate en_US.UTF-8; hook 0700 strips every other locale.
+locales

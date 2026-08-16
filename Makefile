@@ -1,0 +1,163 @@
+# Nightshade OS build entrypoints.
+#
+# Everything here assumes a Linux host. On Windows, drive it through WSL:
+#   wsl -d Ubuntu -u root make iso
+#
+# The ISO build needs root (debootstrap, chroot, bind mounts). Targets that
+# need it pick up $(SUDO) automatically.
+
+VERSION      ?= 0.1.0
+ARCH         := amd64
+
+DIST         ?= dist
+ISO          := $(DIST)/nightshade-$(VERSION)-$(ARCH).iso
+
+# Work tree and VM state default to a native Linux filesystem. Under WSL the
+# repo itself often lives on /mnt/c (9p), which cannot hold a rootfs and is slow
+# for multi-gigabyte disk images.
+WORKDIR      ?= /var/tmp/nightshade-build
+VM_DIR       ?= /var/tmp/nightshade-vm
+APT_CACHE    ?=
+
+# Overridable so the build can put target/ on a native filesystem. Under WSL a
+# cargo target dir on /mnt/c is dramatically slower than one on ext4.
+CARGO_TARGET_DIR ?= target
+export CARGO_TARGET_DIR
+INSTALLER    := $(CARGO_TARGET_DIR)/release/nightshade-install
+
+# VM settings
+VM_MEM       ?= 4096
+VM_CPUS      ?= 4
+VM_DISK_SIZE ?= 20G
+OVMF_CODE    ?= /usr/share/OVMF/OVMF_CODE_4M.fd
+OVMF_VARS    ?= /usr/share/OVMF/OVMF_VARS_4M.fd
+# `none` runs headless on the serial console, which is scriptable and works over
+# SSH. Set VM_DISPLAY=gtk for a window (WSLg or a real X/Wayland session).
+VM_DISPLAY   ?= none
+
+SUDO         := $(shell [ "$$(id -u)" -eq 0 ] || echo sudo)
+
+MKIMAGE_ARGS := -o $(ISO) -v $(VERSION) -w $(WORKDIR)
+ifneq ($(APT_CACHE),)
+MKIMAGE_ARGS += -c $(APT_CACHE)
+endif
+
+QEMU_COMMON = \
+	-machine q35,accel=kvm:tcg \
+	-cpu host \
+	-smp $(VM_CPUS) \
+	-m $(VM_MEM) \
+	-drive if=pflash,format=raw,unit=0,readonly=on,file=$(OVMF_CODE) \
+	-drive if=pflash,format=raw,unit=1,file=$(VM_DIR)/OVMF_VARS.fd \
+	-netdev user,id=net0 -device virtio-net-pci,netdev=net0
+
+ifeq ($(VM_DISPLAY),none)
+QEMU_DISPLAY = -nographic
+else
+QEMU_DISPLAY = -display $(VM_DISPLAY)
+endif
+
+.PHONY: all iso installer test-vm test-vm-disk test-vm-degraded vm-reset clean help
+
+all: iso
+
+help:
+	@echo "Nightshade OS $(VERSION)"
+	@echo
+	@echo "  make installer        build the Rust installer (release)"
+	@echo "  make iso              build $(ISO)"
+	@echo "  make test-vm          boot the ISO in QEMU/OVMF with two blank $(VM_DISK_SIZE) disks"
+	@echo "  make test-vm-disk     boot the installed system from those disks"
+	@echo "  make test-vm-degraded boot with disk 1 detached (mirror degradation test)"
+	@echo "  make vm-reset         wipe VM disks and UEFI vars"
+	@echo "  make clean            remove dist/, target/ and the build work tree"
+	@echo
+	@echo "  VM_DISPLAY=gtk make test-vm    run with a window instead of serial"
+
+# ---------------------------------------------------------------------------
+# installer
+# ---------------------------------------------------------------------------
+
+installer:
+	cargo build --release --locked
+	@ls -l $(INSTALLER)
+
+$(INSTALLER): installer
+
+# ---------------------------------------------------------------------------
+# iso
+# ---------------------------------------------------------------------------
+
+iso: $(INSTALLER)
+	$(SUDO) build/mkimage/mkimage.sh $(MKIMAGE_ARGS) -b $(INSTALLER)
+
+# Build the ISO without the Rust crate. The live session comes up and drops to a
+# shell instead of running an installer; useful for iterating on the image
+# pipeline itself.
+.PHONY: iso-noinstaller
+iso-noinstaller:
+	$(SUDO) build/mkimage/mkimage.sh $(MKIMAGE_ARGS)
+
+# ---------------------------------------------------------------------------
+# QEMU
+# ---------------------------------------------------------------------------
+
+# Blank disks and a pristine UEFI variable store. OVMF_VARS must be a writable
+# per-VM copy; sharing the system one would have QEMU fail or, worse, persist
+# boot entries between unrelated test runs.
+$(VM_DIR)/OVMF_VARS.fd:
+	@mkdir -p $(VM_DIR)
+	cp $(OVMF_VARS) $@
+	chmod u+w $@
+
+$(VM_DIR)/disk0.qcow2:
+	@mkdir -p $(VM_DIR)
+	qemu-img create -f qcow2 $@ $(VM_DISK_SIZE)
+
+$(VM_DIR)/disk1.qcow2:
+	@mkdir -p $(VM_DIR)
+	qemu-img create -f qcow2 $@ $(VM_DISK_SIZE)
+
+VM_DISKS = $(VM_DIR)/disk0.qcow2 $(VM_DIR)/disk1.qcow2 $(VM_DIR)/OVMF_VARS.fd
+
+# Serials are what the installer shows in the disk picker, so give them values
+# that make the two disks tellable apart on screen.
+QEMU_DISK0 = -drive file=$(VM_DIR)/disk0.qcow2,if=none,id=d0,format=qcow2 \
+             -device virtio-blk-pci,drive=d0,serial=NSDISK0
+QEMU_DISK1 = -drive file=$(VM_DIR)/disk1.qcow2,if=none,id=d1,format=qcow2 \
+             -device virtio-blk-pci,drive=d1,serial=NSDISK1
+
+test-vm: $(VM_DISKS)
+	@echo "==> booting $(ISO) (ctrl-a x to quit)"
+	qemu-system-x86_64 $(QEMU_COMMON) $(QEMU_DISPLAY) \
+		-drive file=$(ISO),if=none,id=iso,format=raw,media=cdrom \
+		-device ide-cd,drive=iso,bootindex=0 \
+		$(QEMU_DISK0) $(QEMU_DISK1)
+
+test-vm-disk: $(VM_DISKS)
+	@echo "==> booting installed system from disk (ctrl-a x to quit)"
+	qemu-system-x86_64 $(QEMU_COMMON) $(QEMU_DISPLAY) \
+		$(QEMU_DISK0) $(QEMU_DISK1)
+
+# Acceptance test: a two-disk mirror must still boot with one member absent.
+# DEGRADE=0 removes disk0 instead of disk1.
+DEGRADE ?= 1
+test-vm-degraded: $(VM_DISKS)
+	@echo "==> booting with disk$(DEGRADE) detached (ctrl-a x to quit)"
+	qemu-system-x86_64 $(QEMU_COMMON) $(QEMU_DISPLAY) \
+		$(if $(filter 0,$(DEGRADE)),$(QEMU_DISK1),$(QEMU_DISK0))
+
+vm-reset:
+	rm -rf $(VM_DIR)
+
+# ---------------------------------------------------------------------------
+# housekeeping
+# ---------------------------------------------------------------------------
+
+.PHONY: test
+test:
+	cargo test --release
+
+clean:
+	rm -rf $(DIST) $(CARGO_TARGET_DIR)
+	$(SUDO) rm -rf $(WORKDIR)
