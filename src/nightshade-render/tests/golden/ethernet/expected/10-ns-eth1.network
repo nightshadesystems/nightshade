@@ -1,0 +1,14 @@
+# Managed by Nightshade. Do not edit.
+#
+# This file is generated from /etc/nightshade/config.boot and is rewritten on
+# every commit. Changes made here are lost, and are not part of the config the
+# next boot will apply.
+
+[Match]
+Name=eth1
+
+[Link]
+ActivationPolicy=always-down
+
+[Network]
+DHCP=yes

@@ -147,8 +147,8 @@ impl Paths {
     /// operator editing it by hand should find it gone next boot rather than
     /// silently overriding `config.boot`.
     ///
-    /// Only files under [`MANAGED_PREFIX`](crate::MANAGED_PREFIX) here are
-    /// ours.
+    /// Only files marked with [`MANAGED_MARKER`](crate::MANAGED_MARKER) here
+    /// are ours.
     pub fn networkd_dir(&self) -> PathBuf {
         self.at("run/systemd/network")
     }

@@ -838,6 +838,7 @@ version = "0.1.0"
 dependencies = [
  "nightshade-common",
  "nightshade-proto",
+ "nightshade-render",
  "nightshade-schema",
  "nix 0.31.3",
  "serde",
@@ -870,6 +871,13 @@ dependencies = [
 [[package]]
 name = "nightshade-render"
 version = "0.1.0"
+dependencies = [
+ "nightshade-common",
+ "nightshade-schema",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
 
 [[package]]
 name = "nightshade-schema"

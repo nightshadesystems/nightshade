@@ -69,6 +69,7 @@
 //! because "config changed since session start" without saying what changed
 //! leaves the operator no move but to discard.
 
+pub mod commit;
 pub mod logging;
 pub mod peer;
 pub mod server;

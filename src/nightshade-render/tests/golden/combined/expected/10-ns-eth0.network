@@ -1,0 +1,15 @@
+# Managed by Nightshade. Do not edit.
+#
+# This file is generated from /etc/nightshade/config.boot and is rewritten on
+# every commit. Changes made here are lost, and are not part of the config the
+# next boot will apply.
+
+[Match]
+Name=eth0
+
+[Link]
+MTUBytes=9000
+
+[Network]
+Description=the uplink
+Address=192.168.1.1/24

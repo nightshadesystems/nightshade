@@ -1,0 +1,14 @@
+# Managed by Nightshade. Do not edit.
+#
+# This file is generated from /etc/nightshade/config.boot and is rewritten on
+# every commit. Changes made here are lost, and are not part of the config the
+# next boot will apply.
+
+[Match]
+Name=bond0
+
+[Network]
+Address=10.0.0.1/24
+VLAN=vlan100
+VLAN=vlan200
+VXLAN=vxlan1

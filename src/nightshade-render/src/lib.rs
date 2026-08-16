@@ -54,3 +54,39 @@
 //! table, and a change to one deletes the netdev so networkd rebuilds it.
 //! A table because the alternative is guessing, and guessing wrong here means
 //! reporting success on a change that did not happen.
+
+pub mod artifacts;
+pub mod host;
+pub mod ini;
+pub mod networkd;
+pub mod system;
+
+use std::sync::Arc;
+
+use nightshade_common::paths::Paths;
+
+pub use artifacts::{Action, ApplyError, Artifacts, Managed, RenderError, Renderer};
+pub use host::{Host, HostError, MockHost, Op, RealHost};
+pub use networkd::NetworkdRenderer;
+pub use system::SystemRenderer;
+
+/// Every renderer, in the order the schema says to apply them.
+///
+/// Ordering comes from the schema priority of the subtree each one owns, so
+/// there is one place that decides what is applied before what. A second
+/// ordering here could disagree with the schema, and the disagreement would
+/// only show up as a bond being configured before the ports it enslaves.
+pub fn all(paths: Paths, host: Arc<dyn Host>) -> Vec<Box<dyn Renderer>> {
+    let schema = nightshade_schema::model::Schema::compiled();
+    let mut renderers: Vec<Box<dyn Renderer>> = vec![
+        Box::new(SystemRenderer::new(paths.clone(), Arc::clone(&host))),
+        Box::new(NetworkdRenderer::new(paths, host)),
+    ];
+    renderers.sort_by_key(|renderer| {
+        schema
+            .node_at(&renderer.owns())
+            .map(|node| node.priority)
+            .unwrap_or(u32::MAX)
+    });
+    renderers
+}

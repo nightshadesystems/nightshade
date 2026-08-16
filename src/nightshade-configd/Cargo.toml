@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 nightshade-common = { workspace = true }
 nightshade-proto = { workspace = true }
+nightshade-render = { workspace = true }
 nightshade-schema = { workspace = true }
 
 # Only what is used. `process` in particular is absent: configd runs as root,
@@ -40,5 +41,6 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 [dev-dependencies]
 # For forging requests the typed `Request` cannot express, which is the whole
 # point of the protocol tests.
+nightshade-render = { workspace = true }
 serde = { workspace = true }
 tempfile = { workspace = true }

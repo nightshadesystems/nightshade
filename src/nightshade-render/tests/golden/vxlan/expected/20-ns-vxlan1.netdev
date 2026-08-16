@@ -1,0 +1,16 @@
+# Managed by Nightshade. Do not edit.
+#
+# This file is generated from /etc/nightshade/config.boot and is rewritten on
+# every commit. Changes made here are lost, and are not part of the config the
+# next boot will apply.
+
+[NetDev]
+Name=vxlan1
+Kind=vxlan
+
+[VXLAN]
+VNI=4242
+Remote=10.0.0.2
+Local=10.0.0.1
+DestinationPort=4789
+TTL=64

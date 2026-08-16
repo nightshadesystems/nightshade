@@ -1,0 +1,3 @@
+hostnamectl set-hostname fw-01
+timedatectl set-timezone Europe/London
+networkctl reload

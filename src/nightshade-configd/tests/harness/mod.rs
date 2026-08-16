@@ -25,6 +25,7 @@ use nightshade_common::paths::Paths;
 use nightshade_configd::{Access, Bound, Configd, Server};
 use nightshade_proto::frame;
 use nightshade_proto::message::{Request, Response, SessionId};
+use nightshade_render::MockHost;
 use nightshade_schema::model::Schema;
 use tempfile::TempDir;
 use tokio::sync::watch;
@@ -32,6 +33,7 @@ use tokio::sync::watch;
 pub struct Harness {
     dir: TempDir,
     paths: Paths,
+    host: Arc<MockHost>,
     shutdown: watch::Sender<bool>,
     server: Option<std::thread::JoinHandle<()>>,
 }
@@ -39,31 +41,50 @@ pub struct Harness {
 impl Harness {
     pub fn start() -> Self {
         let dir = tempfile::tempdir().expect("a temporary directory");
-        Self::start_in(dir)
+        Self::start_in(dir, Arc::new(MockHost::new()))
     }
 
     /// Start a fresh configd over an existing state directory, as a restart
     /// would.
+    ///
+    /// The host carries over, because a restart does not un-apply anything: the
+    /// files a previous configd wrote into `/run/systemd/network` are still
+    /// there, and so is the last-applied state it would restore from.
     pub fn restart(self) -> Self {
+        let host = Arc::clone(&self.host);
         let dir = self.stop();
-        Self::start_in(dir)
+        Self::start_in(dir, host)
     }
 
-    fn start_in(dir: TempDir) -> Self {
+    /// What the renderers did, so a test can assert on the ordering and the
+    /// files without a network.
+    pub fn host(&self) -> &MockHost {
+        &self.host
+    }
+
+    fn start_in(dir: TempDir, host: Arc<MockHost>) -> Self {
         let paths = Paths::under(dir.path());
         let socket = paths.socket();
         let (shutdown, rx) = watch::channel(false);
 
         let serving = paths.clone();
+        let host_for_server: Arc<dyn nightshade_render::Host> = Arc::clone(&host) as _;
+        let host = Arc::clone(&host);
         let server = std::thread::spawn(move || {
+            let host = host_for_server;
             let runtime = tokio::runtime::Builder::new_current_thread()
                 .enable_all()
                 .build()
                 .expect("a runtime");
             runtime.block_on(async move {
                 let access = Access::current_user();
-                let configd =
-                    Arc::new(Configd::start(Schema::compiled(), serving).expect("configd starts"));
+                // Renderers write their artifacts for real, into memory, and
+                // apply nothing. Every decision the pipeline makes is
+                // exercised; only the last inch that would change a live
+                // interface is not.
+                let configd = Arc::new(
+                    Configd::start(Schema::compiled(), serving, host).expect("configd starts"),
+                );
                 let bound = Bound::create(&socket, &access).expect("the socket binds");
                 Server::new(configd, access).run(bound, rx).await;
             });
@@ -72,6 +93,7 @@ impl Harness {
         let harness = Self {
             dir,
             paths,
+            host,
             shutdown,
             server: Some(server),
         };

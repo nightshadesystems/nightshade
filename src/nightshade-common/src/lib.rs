@@ -28,14 +28,23 @@ pub const ADMIN_GROUP: &str = "nightshade-admin";
 /// Mode of `configd.sock`. Group-writable, no world access.
 pub const SOCKET_MODE: u32 = 0o660;
 
-/// Prefix on every file Nightshade writes into a shared systemd directory.
+/// Marker in the name of every file Nightshade writes into a shared systemd
+/// directory.
 ///
 /// `/run/systemd/network` is not ours: a networkd unit dropped there by hand,
 /// or by a future package, has to survive us. Renderers may only create,
-/// overwrite or delete files starting with this, and the sync step that
+/// overwrite or delete files whose name contains this, and the sync step that
 /// removes stale files filters on it. Nothing else in the tree is safe to
 /// delete on the strength of "we did not render it this time".
-pub const MANAGED_PREFIX: &str = "ns-";
+///
+/// An infix rather than a prefix, which is not what it looks like it should
+/// be. systemd picks the *first* matching `.network` for an interface in
+/// lexical order, so the ordering number has to come first --
+/// `10-ns-eth0.network`. Putting the marker first instead would sort every
+/// Nightshade file after every numbered one, and a stray `50-something.network`
+/// left on the box would quietly win against the configuration the operator
+/// committed.
+pub const MANAGED_MARKER: &str = "-ns-";
 
 /// Commit revisions retained in the archive before pruning.
 pub const ARCHIVE_KEEP: usize = 50;

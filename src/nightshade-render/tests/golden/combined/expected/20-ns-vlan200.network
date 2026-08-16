@@ -1,0 +1,11 @@
+# Managed by Nightshade. Do not edit.
+#
+# This file is generated from /etc/nightshade/config.boot and is rewritten on
+# every commit. Changes made here are lost, and are not part of the config the
+# next boot will apply.
+
+[Match]
+Name=vlan200
+
+[Network]
+Bridge=br0

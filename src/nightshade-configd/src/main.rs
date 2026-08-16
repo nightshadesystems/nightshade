@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use nightshade_common::{VERSION, paths::Paths};
 use nightshade_configd::{Access, Bound, Configd, Server, logging};
+use nightshade_render::RealHost;
 use nightshade_schema::model::Schema;
 use tokio::sync::watch;
 use tracing::{error, info};
@@ -33,7 +34,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     info!(version = VERSION, "starting");
 
-    let configd = Arc::new(Configd::start(schema, paths.clone())?);
+    let configd = Arc::new(Configd::start(schema, paths.clone(), Arc::new(RealHost))?);
 
     // systemd's socket if there is one, ours if not. Both give the same
     // socket with the same mode; the difference is only who created it.

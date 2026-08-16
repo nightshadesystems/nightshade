@@ -58,6 +58,14 @@ pub enum Request {
 
     /// Throw the candidate away and start again from running.
     Discard { session: SessionId },
+
+    /// Validate, render, apply and promote the candidate.
+    Commit {
+        session: SessionId,
+        /// Recorded against the revision. What the operator was doing, in
+        /// their own words, which is the part no diff can reconstruct.
+        comment: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,25 +76,33 @@ pub enum Response {
     /// names nothing configured.
     Config { tree: ConfigTree },
     Changes { changes: Vec<Change> },
+    /// A commit that took effect. `changes` is empty when the candidate
+    /// already matched running, which is a success and not an error.
+    Committed {
+        generation: u64,
+        changes: Vec<Change>,
+    },
     Failed { kind: FailureKind, message: String },
 }
 
-/// Why a request failed, coarsely enough to choose an exit code and finely
-/// enough to be worth carrying.
+/// Why a request failed, coarsely enough to be worth carrying.
 ///
 /// The *text* is configd's and is shown verbatim: it is the only side that
 /// knows the schema, the running config and who asked. A client that
 /// paraphrases produces a second wording of every error.
+///
+/// Exit codes are not decided here. `ns` chooses one from the command and the
+/// kind together, because the same kind means different things after `set` and
+/// after `commit`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum FailureKind {
-    /// Malformed, or about a session that is not there. `ns` exits 1.
+    /// Malformed, or about a session that is not there.
     Request,
     /// The config was refused: a bad value, an unknown path, a constraint.
-    /// `ns` exits 2.
     Validation,
-    /// Someone else moved first. `ns` exits 2.
+    /// Someone else moved first.
     Conflict,
-    /// configd could not do it, and it is not the caller's fault. `ns` exits 1.
+    /// configd could not do it, and it is not the caller's fault.
     Internal,
 }
 
