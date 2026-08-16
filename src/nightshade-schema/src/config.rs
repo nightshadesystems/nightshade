@@ -401,6 +401,28 @@ impl ConfigTree {
         true
     }
 
+    /// A config containing only `path` and everything below it, keeping the
+    /// full path structure.
+    ///
+    /// What `show interfaces ethernet` sends back. Full paths rather than a
+    /// tree rooted at the request, so the result renders through the ordinary
+    /// renderer and reads as a fragment of the config rather than as a
+    /// different config that happens to look similar.
+    pub fn subtree(&self, path: &Path) -> Option<ConfigTree> {
+        let node = self.get(path)?.clone();
+        let Some((parent, last)) = path.split_last() else {
+            return Some(self.clone());
+        };
+        let mut tree = ConfigTree::new();
+        let parent_node = tree
+            .ensure_interior(&parent)
+            .expect("a fresh tree has no leaves to collide with");
+        if let Body::Interior(children) = &mut parent_node.body {
+            children.insert(last.to_string(), node);
+        }
+        Some(tree)
+    }
+
     /// Attach or clear the comment on an existing node.
     ///
     /// Returns false if there is no node there. Comments are set on what

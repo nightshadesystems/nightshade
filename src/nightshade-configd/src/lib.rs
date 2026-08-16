@@ -68,3 +68,13 @@
 //! last changed is refused -- with the diff of what changed underneath it,
 //! because "config changed since session start" without saying what changed
 //! leaves the operator no move but to discard.
+
+pub mod logging;
+pub mod peer;
+pub mod server;
+pub mod session;
+pub mod state;
+
+pub use peer::{Access, Actor};
+pub use server::{Bound, Server};
+pub use state::Configd;

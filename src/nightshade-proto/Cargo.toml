@@ -7,4 +7,13 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
+# No tokio, and no async. The framing *rule* lives here -- length prefix, byte
+# order, size cap -- and each side does its own reads with it: configd through
+# tokio, the CLI through std. A feature-gated async surface would be tidier
+# right up until cargo unified the feature across the workspace and put a
+# runtime inside the binary that every login shell execs.
 [dependencies]
+ciborium = { workspace = true }
+nightshade-schema = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

@@ -50,6 +50,7 @@
 
 pub mod config;
 pub mod curly;
+pub mod diff;
 pub mod lex;
 pub mod loader;
 pub mod model;
@@ -58,6 +59,7 @@ pub mod validate;
 pub mod value;
 
 pub use config::{ConfigTree, Node};
+pub use diff::{Change, Op};
 pub use loader::SchemaError;
 pub use model::{NodeInfo, NodeKind, Schema, SchemaNode};
 pub use path::Path;

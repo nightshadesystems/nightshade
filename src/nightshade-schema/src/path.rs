@@ -31,7 +31,15 @@ pub enum PathError {
 ///
 /// Ordered and comparable so paths sort predictably in diffs and error lists;
 /// hashable so they can key a map of, say, pending changes.
-#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+///
+/// Serialised as its segments rather than as the text an operator typed. A
+/// path arriving over the socket is then a list of strings, and configd never
+/// has to run the tokeniser over something a client sent -- one less parser
+/// between an untrusted byte and a daemon running as root.
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
+)]
+#[serde(transparent)]
 pub struct Path {
     segments: Vec<String>,
 }

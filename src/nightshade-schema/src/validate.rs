@@ -75,6 +75,24 @@ pub enum SetError {
 
     #[error("`{path}` groups other settings; set one of them instead")]
     NotSettable { path: Path },
+
+    /// The schema accepted it and the tree would not take it -- a leaf where a
+    /// container already is, or the reverse. Reachable from a config that was
+    /// hand-edited into a shape the schema no longer describes.
+    #[error("`{path}`: {message}")]
+    Rejected { path: Path, message: String },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum DeleteError {
+    #[error("`{path}` is not a configuration path")]
+    UnknownPath { path: Path },
+
+    #[error("`{path}` is not configured")]
+    NotConfigured { path: Path },
+
+    #[error("`{path}` does not have the value {value:?}")]
+    NoSuchValue { path: Path, value: String },
 }
 
 impl Schema {
@@ -160,6 +178,84 @@ impl Schema {
                 path: path.child(value),
             }),
             (Location::Value(_), _) => Err(SetError::UnknownPath { path: path.clone() }),
+        }
+    }
+
+    /// Validate a `set` and apply it.
+    ///
+    /// The two halves belong together because what "apply" means is a schema
+    /// question, and getting it wrong is silent. A `set` with no value creates
+    /// a flag if the node is one and a bare tag instance if it is not; a `set`
+    /// with a value replaces on a leaf and accumulates on a multi-leaf. A
+    /// caller that guessed would turn `interfaces ethernet eth1` into a leaf,
+    /// at which point nothing can be configured under it and nothing can
+    /// reference it -- and the config would still look almost right.
+    pub fn apply_set(
+        &self,
+        config: &mut ConfigTree,
+        path: &Path,
+        value: Option<&str>,
+    ) -> Result<(), SetError> {
+        self.validate_set(path, value)?;
+
+        let unexpected = |e| SetError::Rejected {
+            path: path.clone(),
+            message: format!("{e}"),
+        };
+
+        match (self.resolve(path), value) {
+            (_, Some(value)) if self.is_multi_leaf(path) => {
+                config.add(path, value).map_err(unexpected)
+            }
+            (_, Some(value)) => config.set(path, value).map_err(unexpected),
+            // A tag instance with nothing under it yet.
+            (Some(Location::Instance(_)), None) => {
+                config.ensure_interior(path).map(|_| ()).map_err(unexpected)
+            }
+            (_, None) => config.set_flag(path).map_err(unexpected),
+        }
+    }
+
+    fn is_multi_leaf(&self, path: &Path) -> bool {
+        matches!(
+            self.resolve(path),
+            Some(Location::Node(node)) if matches!(node.kind, NodeKind::MultiLeaf(_))
+        )
+    }
+
+    /// Remove a node, or one value of a multi-leaf.
+    ///
+    /// Deleting something that is not there is an error rather than a no-op.
+    /// `delete interfaces ethernet eth0 addres 10.0.0.1/24` succeeding
+    /// quietly is how an operator comes to believe they removed an address
+    /// they did not.
+    pub fn apply_delete(
+        &self,
+        config: &mut ConfigTree,
+        path: &Path,
+        value: Option<&str>,
+    ) -> Result<(), DeleteError> {
+        if self.resolve(path).is_none() {
+            return Err(DeleteError::UnknownPath { path: path.clone() });
+        }
+        match value {
+            Some(value) => {
+                if config.remove_value(path, value) {
+                    Ok(())
+                } else {
+                    Err(DeleteError::NoSuchValue {
+                        path: path.clone(),
+                        value: value.to_string(),
+                    })
+                }
+            }
+            None => {
+                if config.remove(path) {
+                    Ok(())
+                } else {
+                    Err(DeleteError::NotConfigured { path: path.clone() })
+                }
+            }
         }
     }
 

@@ -7,8 +7,38 @@ license.workspace = true
 authors.workspace = true
 repository.workspace = true
 
-# The `nightshade-configd` binary target arrives with the daemon itself. There
-# is nothing yet for a `main` to do that is not a stub, and a stub that prints
-# its own name is worse than an absent target: it builds, it installs, and it
-# looks like something works.
+[[bin]]
+name = "nightshade-configd"
+path = "src/main.rs"
+
 [dependencies]
+nightshade-common = { workspace = true }
+nightshade-proto = { workspace = true }
+nightshade-schema = { workspace = true }
+
+# Only what is used. `process` in particular is absent: configd runs as root,
+# and the day it needs to spawn something should be a deliberate edit here
+# rather than a capability that was already lying around.
+tokio = { workspace = true, features = [
+    "rt-multi-thread",
+    "net",
+    "macros",
+    "signal",
+    "time",
+    "sync",
+    "io-util",
+] }
+
+nix = { workspace = true, features = ["user", "fs"] }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-journald = { workspace = true }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }
+
+[dev-dependencies]
+# For forging requests the typed `Request` cannot express, which is the whole
+# point of the protocol tests.
+serde = { workspace = true }
+tempfile = { workspace = true }

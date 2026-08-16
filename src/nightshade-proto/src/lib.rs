@@ -30,3 +30,9 @@
 //! Presentation is the CLI's problem, and it is the CLI's alone.
 //!
 //! Nothing in this phase builds that frontend.
+
+pub mod frame;
+pub mod message;
+
+pub use frame::{FrameError, MAX_BODY};
+pub use message::{FailureKind, Request, Response, SessionId};
