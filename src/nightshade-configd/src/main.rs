@@ -36,6 +36,11 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let configd = Arc::new(Configd::start(schema, paths.clone(), Arc::new(RealHost))?);
 
+    // Before the socket opens. If a commit was left waiting on confirmation
+    // when configd stopped, it is either resumed or rolled back now -- not
+    // after the first client happens to connect.
+    configd.resume().await;
+
     // systemd's socket if there is one, ours if not. Both give the same
     // socket with the same mode; the difference is only who created it.
     let bound = match Bound::from_systemd()? {

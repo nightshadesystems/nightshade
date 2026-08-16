@@ -35,4 +35,4 @@ pub mod frame;
 pub mod message;
 
 pub use frame::{FrameError, MAX_BODY};
-pub use message::{FailureKind, Request, Response, SessionId};
+pub use message::{FailureKind, LoadSource, Request, Response, RevisionInfo, SessionId};

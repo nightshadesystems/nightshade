@@ -65,7 +65,56 @@ pub enum Request {
         /// Recorded against the revision. What the operator was doing, in
         /// their own words, which is the part no diff can reconstruct.
         comment: Option<String>,
+        /// Apply, but roll back automatically unless confirmed within this
+        /// many minutes.
+        confirm_minutes: Option<u16>,
     },
+
+    /// Keep a change that is waiting on confirmation.
+    Confirm { session: SessionId },
+
+    /// Write the running configuration to `config.boot`.
+    ///
+    /// No session: this saves what is applied, not what somebody is editing.
+    Save,
+
+    /// Replace the candidate with a configuration from somewhere else.
+    Load {
+        session: SessionId,
+        source: LoadSource,
+    },
+
+    /// The archive, newest first.
+    CommitLog,
+}
+
+/// Where a `Load` gets its configuration.
+///
+/// Deliberately not a path. configd runs as root, and a client-supplied
+/// filename would be an arbitrary-read primitive dressed as a convenience --
+/// the error message from failing to parse `/etc/shadow` would contain a line
+/// of it. Both real sources are named rather than described.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum LoadSource {
+    /// `/etc/nightshade/config.boot`, including whatever an operator edited
+    /// into it by hand.
+    Saved,
+    /// An archived revision. This is what `rollback` is.
+    Archive { revision: u64 },
+}
+
+/// One entry in the commit archive.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RevisionInfo {
+    pub revision: u64,
+    /// `YYYYMMDDTHHMMSSZ`.
+    pub timestamp: String,
+    /// Resolved when the commit happened. A log that resolves uids when it is
+    /// read stops making sense the moment a user is deleted.
+    pub actor: String,
+    pub actor_uid: u32,
+    pub comment: Option<String>,
+    pub changes: Vec<Change>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +130,13 @@ pub enum Response {
     Committed {
         generation: u64,
         changes: Vec<Change>,
+        /// Seconds left to confirm, when the commit was made with
+        /// `confirm`. The change is applied either way; this is how long
+        /// before it is undone again.
+        confirm_within: Option<u64>,
+    },
+    Revisions {
+        revisions: Vec<RevisionInfo>,
     },
     Failed { kind: FailureKind, message: String },
 }

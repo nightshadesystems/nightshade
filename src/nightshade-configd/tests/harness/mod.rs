@@ -85,6 +85,7 @@ impl Harness {
                 let configd = Arc::new(
                     Configd::start(Schema::compiled(), serving, host).expect("configd starts"),
                 );
+                configd.resume().await;
                 let bound = Bound::create(&socket, &access).expect("the socket binds");
                 Server::new(configd, access).run(bound, rx).await;
             });
@@ -128,6 +129,27 @@ impl Harness {
 
     pub fn paths(&self) -> &Paths {
         &self.paths
+    }
+
+    /// Move the pending-confirm deadline, so the rollback can be tested
+    /// without waiting out a window measured in minutes.
+    ///
+    /// Reaches into the marker file rather than into configd, which is the
+    /// honest way round: the marker is the contract between one run of the
+    /// daemon and the next, and a test that can only set the deadline through
+    /// an internal API would not be testing that contract.
+    pub fn move_confirm_deadline(&self, seconds_from_now: i64) {
+        let path = self.paths.pending_confirm();
+        let text = std::fs::read_to_string(&path).expect("a pending-confirm marker");
+        let mut marker: serde_json::Value =
+            serde_json::from_str(&text).expect("the marker is JSON");
+        let now = jiff::Timestamp::now().as_second();
+        marker["deadline"] = serde_json::json!(now + seconds_from_now);
+        std::fs::write(&path, serde_json::to_vec(&marker).unwrap()).expect("writing the marker");
+    }
+
+    pub fn confirm_pending(&self) -> bool {
+        self.paths.pending_confirm().exists()
     }
 
     pub fn connect(&self) -> Client {

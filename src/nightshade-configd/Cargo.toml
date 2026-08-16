@@ -32,6 +32,8 @@ tokio = { workspace = true, features = [
 
 nix = { workspace = true, features = ["user", "fs"] }
 serde = { workspace = true }
+flate2 = { workspace = true }
+jiff = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
@@ -42,5 +44,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter"] }
 # For forging requests the typed `Request` cannot express, which is the whole
 # point of the protocol tests.
 nightshade-render = { workspace = true }
+jiff = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 tempfile = { workspace = true }

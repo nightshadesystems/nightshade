@@ -22,15 +22,19 @@ use std::io::Read;
 use std::sync::Arc;
 
 use nightshade_common::paths::Paths;
-use nightshade_proto::message::{FailureKind, Request, Response, SessionId};
+use nightshade_proto::message::{
+    FailureKind, LoadSource, Request, Response, RevisionInfo, SessionId,
+};
 use nightshade_render::{Host, Renderer};
 use nightshade_schema::config::ConfigTree;
 use nightshade_schema::diff;
 use nightshade_schema::model::Schema;
 use nightshade_schema::path::Path;
 use tokio::sync::Mutex;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
+use crate::archive::{self, Archive};
+use crate::confirm::{self, Marker, Pending};
 use crate::commit;
 use crate::peer::Actor;
 use crate::session::{Session, Store};
@@ -46,6 +50,8 @@ pub struct Configd {
     schema: &'static Schema,
     paths: Paths,
     store: Store,
+    archive: Archive,
+    marker: Marker,
     renderers: Vec<Box<dyn Renderer>>,
     state: Mutex<State>,
 }
@@ -55,6 +61,13 @@ struct State {
     generation: u64,
     history: VecDeque<(u64, ConfigTree)>,
     sessions: BTreeMap<SessionId, Session>,
+    /// A commit that is applied and waiting to be kept.
+    ///
+    /// At most one. It is a lock on the whole configuration: a second commit
+    /// while one is pending would leave nothing coherent to roll back to.
+    pending: Option<Pending>,
+    /// The task that will roll `pending` back. Aborted on confirmation.
+    timer: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl Configd {
@@ -85,16 +98,123 @@ impl Configd {
 
         Ok(Self {
             schema,
-            paths: paths.clone(),
             store,
-            renderers: nightshade_render::all(paths, host),
+            archive: Archive::new(paths.archive_dir()),
+            marker: Marker::new(paths.clone()),
+            renderers: nightshade_render::all(paths.clone(), host),
+            paths,
             state: Mutex::new(State {
                 running,
                 generation,
                 history: VecDeque::new(),
                 sessions,
+                pending: None,
+                timer: None,
             }),
         })
+    }
+
+    /// Pick up a commit-confirm that was in flight when configd stopped.
+    ///
+    /// Separate from `start` because arming a timer needs an `Arc<Self>` and
+    /// `start` has not produced one yet. Called once, immediately after.
+    ///
+    /// This is the half of commit-confirm that makes it worth having. A
+    /// firewall whose config daemon was restarted -- by an upgrade, by a
+    /// crash, by the change that was being confirmed -- must still roll back.
+    pub async fn resume(self: &Arc<Self>) {
+        let pending = match self.marker.read() {
+            Ok(Some(pending)) => pending,
+            Ok(None) => return,
+            Err(e) => {
+                // Cannot roll back to a configuration we cannot read. Say so
+                // as loudly as possible: something is applied that nobody
+                // confirmed, and now nothing will undo it.
+                error!(
+                    error = %e,
+                    "a commit was awaiting confirmation and the marker is unreadable; \
+                     the unconfirmed configuration will NOT be rolled back"
+                );
+                return;
+            }
+        };
+
+        if pending.expired() {
+            warn!(
+                actor = %pending.actor,
+                "a commit was awaiting confirmation and its deadline has passed; rolling back now"
+            );
+            let mut state = self.state.lock().await;
+            state.pending = Some(pending);
+            drop(state);
+            self.roll_back().await;
+            return;
+        }
+
+        let remaining = pending.remaining();
+        warn!(
+            actor = %pending.actor,
+            seconds = remaining,
+            "a commit is still awaiting confirmation; the timer has been armed again"
+        );
+        let mut state = self.state.lock().await;
+        state.pending = Some(pending);
+        state.timer = Some(self.arm_timer(remaining));
+    }
+
+    /// The task that undoes an unconfirmed commit.
+    fn arm_timer(self: &Arc<Self>, seconds: u64) -> tokio::task::JoinHandle<()> {
+        let configd = Arc::clone(self);
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_secs(seconds)).await;
+            configd.roll_back().await;
+        })
+    }
+
+    /// Undo the pending commit, through the same pipeline that applied it.
+    ///
+    /// The same pipeline, not a shortcut: a rollback is a configuration change
+    /// like any other, and one that took a different route to the machine
+    /// would be a second implementation to get wrong -- on the path that only
+    /// runs when something has already gone wrong.
+    async fn roll_back(self: &Arc<Self>) {
+        let mut state = self.state.lock().await;
+        let Some(pending) = state.pending.take() else {
+            return;
+        };
+        state.timer = None;
+
+        error!(
+            actor = %pending.actor,
+            minutes = pending.minutes,
+            "commit was not confirmed; rolling back"
+        );
+
+        match commit::apply(&self.renderers, &pending.previous) {
+            Ok(()) => {
+                let generation = state.generation + 1;
+                state.running = pending.previous;
+                state.generation = generation;
+                if let Err(e) = save_running(&self.paths, &state.running, generation) {
+                    warn!(error = %e, "could not record the running configuration");
+                }
+                info!(generation, "rolled back");
+            }
+            Err(e) => {
+                // The box is running an unconfirmed change and cannot be put
+                // back. Nothing here can fix that; being unmistakable about it
+                // is the whole remaining job.
+                error!(
+                    error = %e,
+                    "ROLLING BACK AN UNCONFIRMED COMMIT FAILED; \
+                     this system is running a configuration nobody confirmed"
+                );
+            }
+        }
+
+        if let Err(e) = self.marker.disarm() {
+            warn!(error = %e, "could not remove the pending-confirm marker");
+        }
     }
 
     pub fn paths(&self) -> &Paths {
@@ -105,7 +225,7 @@ impl Configd {
         self.state.lock().await.sessions.len()
     }
 
-    pub async fn handle(&self, request: Request, actor: &Actor) -> Response {
+    pub async fn handle(self: &Arc<Self>, request: Request, actor: &Actor) -> Response {
         match request {
             Request::SessionOpen => self.open(actor).await,
             Request::SessionClose { session } => self.close(&session, actor).await,
@@ -124,19 +244,51 @@ impl Configd {
             Request::ShowSaved { path } => self.show_saved(&path),
             Request::Compare { session } => self.compare(&session, actor).await,
             Request::Discard { session } => self.discard(&session, actor).await,
-            Request::Commit { session, comment } => {
-                self.commit(&session, actor, comment.as_deref()).await
+            Request::Commit {
+                session,
+                comment,
+                confirm_minutes,
+            } => {
+                self.commit(&session, actor, comment.as_deref(), confirm_minutes)
+                    .await
             }
+            Request::Confirm { session } => self.confirm(&session, actor).await,
+            Request::Save => self.save().await,
+            Request::Load { session, source } => self.load(&session, actor, source).await,
+            Request::CommitLog => self.commit_log(),
         }
     }
 
     // -- committing ---------------------------------------------------------
 
-    async fn commit(&self, id: &SessionId, actor: &Actor, comment: Option<&str>) -> Response {
+    async fn commit(
+        self: &Arc<Self>,
+        id: &SessionId,
+        actor: &Actor,
+        comment: Option<&str>,
+        confirm_minutes: Option<u16>,
+    ) -> Response {
         let mut state = self.state.lock().await;
         if let Err(response) = owned(&state, id, actor) {
             return response;
         }
+
+        // One unconfirmed change at a time. A second commit on top of one
+        // would leave the marker pointing at a configuration two changes back,
+        // so a rollback would undo work nobody asked it to.
+        if let Some(pending) = &state.pending {
+            return Response::failed(
+                FailureKind::Conflict,
+                format!(
+                    "{} committed a change {} minutes ago that is still waiting to be confirmed \
+                     ({} seconds left).\nconfirm it, or wait for it to roll back.",
+                    pending.actor,
+                    pending.minutes,
+                    pending.remaining()
+                ),
+            );
+        }
+
         let session = state.sessions.get(id).expect("checked");
         let candidate = session.candidate.clone();
         let base = session.base_generation;
@@ -160,6 +312,7 @@ impl Configd {
             return Response::Committed {
                 generation: state.generation,
                 changes,
+                confirm_within: None,
             };
         }
 
@@ -208,6 +361,60 @@ impl Configd {
             }
         }
 
+        // A confirmed commit is a revision; an unconfirmed one is not yet.
+        // Archiving now would put a configuration into the history that is
+        // about to be undone.
+        let confirm_within = match confirm_minutes {
+            None => {
+                self.record(&state.running, actor, comment, generation, &changes);
+                None
+            }
+            Some(minutes) => {
+                let pending = Pending {
+                    deadline: confirm::deadline_in(minutes),
+                    minutes,
+                    session: id.clone(),
+                    actor_uid: actor.uid,
+                    actor: actor.username.clone(),
+                    comment: comment.map(str::to_string),
+                    previous: state
+                        .history
+                        .back()
+                        .map(|(_, config)| config.clone())
+                        .unwrap_or_default(),
+                    previous_generation: was,
+                    committed: state.running.clone(),
+                    generation,
+                };
+                let remaining = pending.remaining();
+
+                // The marker before the timer. A configd that dies between
+                // these two leaves a marker with no timer, which the next
+                // startup recovers -- the other order leaves a timer with no
+                // marker, which nothing recovers.
+                if let Err(e) = self.marker.arm(&pending) {
+                    error!(error = %e, "could not arm the confirm marker");
+                    return Response::failed(
+                        FailureKind::Internal,
+                        format!(
+                            "the change was applied, but the rollback timer could not be armed: {e}\n\
+                             confirm or revert this by hand"
+                        ),
+                    );
+                }
+                state.pending = Some(pending);
+                state.timer = Some(self.arm_timer(remaining));
+
+                warn!(
+                    session = %id,
+                    actor = %actor.describe(),
+                    minutes,
+                    "committed, awaiting confirmation"
+                );
+                Some(remaining)
+            }
+        };
+
         info!(
             session = %id,
             actor = %actor.describe(),
@@ -217,6 +424,181 @@ impl Configd {
         Response::Committed {
             generation,
             changes,
+            confirm_within,
+        }
+    }
+
+    async fn confirm(&self, id: &SessionId, actor: &Actor) -> Response {
+        let mut state = self.state.lock().await;
+        if let Err(response) = owned(&state, id, actor) {
+            return response;
+        }
+
+        let Some(pending) = state.pending.take() else {
+            return Response::bad_request(
+                "nothing is waiting to be confirmed".to_string(),
+            );
+        };
+
+        // Anyone in the admin group may confirm. The operator who committed
+        // may be exactly the one who has just lost their session, and refusing
+        // their colleague would turn a recoverable situation into an outage
+        // with a countdown on it.
+        if pending.actor_uid != actor.uid {
+            info!(
+                confirmed_by = %actor.describe(),
+                committed_by = %pending.actor,
+                "confirming somebody else's commit"
+            );
+        }
+
+        if let Some(timer) = state.timer.take() {
+            timer.abort();
+        }
+        if let Err(e) = self.marker.disarm() {
+            warn!(error = %e, "could not remove the pending-confirm marker");
+        }
+
+        let changes = commit::order(
+            self.schema,
+            diff::diff(&pending.previous, &pending.committed),
+        );
+        self.record(
+            &pending.committed,
+            actor,
+            pending.comment.as_deref(),
+            pending.generation,
+            &changes,
+        );
+
+        info!(
+            actor = %actor.describe(),
+            generation = pending.generation,
+            "confirmed"
+        );
+        Response::Committed {
+            generation: pending.generation,
+            changes,
+            confirm_within: None,
+        }
+    }
+
+    /// Append a revision to the archive.
+    ///
+    /// Failing to archive does not fail the commit. The change is applied and
+    /// working; losing the history entry is bad and is not worth undoing a
+    /// good configuration for.
+    fn record(
+        &self,
+        config: &ConfigTree,
+        actor: &Actor,
+        comment: Option<&str>,
+        revision: u64,
+        changes: &[nightshade_schema::diff::Change],
+    ) {
+        let info = RevisionInfo {
+            revision,
+            timestamp: archive::stamp(),
+            actor: actor.username.clone(),
+            actor_uid: actor.uid,
+            comment: comment.map(str::to_string),
+            changes: changes.to_vec(),
+        };
+        if let Err(e) = self.archive.write(&info, config, self.schema) {
+            warn!(revision, error = %e, "could not archive this revision");
+        }
+    }
+
+    // -- saved configuration and the archive --------------------------------
+
+    async fn save(&self) -> Response {
+        let state = self.state.lock().await;
+        let path = self.paths.config_boot();
+
+        if let Some(parent) = path.parent()
+            && let Err(e) = std::fs::create_dir_all(parent)
+        {
+            return internal(format!("creating {}", parent.display()), e);
+        }
+
+        // Write and rename. A truncated `config.boot` is a box that boots to
+        // defaults, and it would be truncated at exactly the moment somebody
+        // was making sure their change survived a reboot.
+        let text = nightshade_schema::curly::render(&state.running, self.schema);
+        let temporary = path.with_extension("boot.new");
+        if let Err(e) = std::fs::write(&temporary, &text) {
+            return internal(format!("writing {}", temporary.display()), e);
+        }
+        if let Err(e) = std::fs::rename(&temporary, &path) {
+            return internal(format!("renaming to {}", path.display()), e);
+        }
+
+        info!(path = %path.display(), bytes = text.len(), "saved");
+        Response::Ok
+    }
+
+    async fn load(&self, id: &SessionId, actor: &Actor, source: LoadSource) -> Response {
+        let mut state = self.state.lock().await;
+        if let Err(response) = owned(&state, id, actor) {
+            return response;
+        }
+
+        let (config, described) = match source {
+            LoadSource::Saved => {
+                let path = self.paths.config_boot();
+                let text = match std::fs::read_to_string(&path) {
+                    Ok(text) => text,
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                        return Response::bad_request(format!(
+                            "{} does not exist; nothing has been saved on this system",
+                            path.display()
+                        ));
+                    }
+                    Err(e) => return internal(format!("reading {}", path.display()), e),
+                };
+                match nightshade_schema::curly::parse(&text) {
+                    Ok(config) => (config, path.display().to_string()),
+                    Err(e) => {
+                        return Response::failed(
+                            FailureKind::Validation,
+                            format!("{}: {e}", path.display()),
+                        );
+                    }
+                }
+            }
+            LoadSource::Archive { revision } => match self.archive.read(revision, self.schema) {
+                Ok(config) => (config, format!("revision {revision}")),
+                Err(e) => return Response::bad_request(e.to_string()),
+            },
+        };
+
+        // Checked now rather than at commit. A hand-edited file wants its
+        // mistakes pointed out while the operator still has the editor open,
+        // and loading rubbish into the candidate only moves the complaint.
+        let violations = self.schema.validate_tree(&config);
+        if !violations.is_empty() {
+            let mut message = format!("{described} is not a valid configuration:\n");
+            for violation in &violations {
+                message.push_str(&format!("  {violation}\n"));
+            }
+            message.push_str("\nthe candidate configuration has not been changed.");
+            return Response::failed(FailureKind::Validation, message);
+        }
+
+        let session = state.sessions.get_mut(id).expect("checked");
+        session.candidate = config;
+        if let Err(e) = self.store.save(session) {
+            return internal("saving the session", e);
+        }
+
+        info!(session = %id, actor = %actor.describe(), source = %described, "loaded");
+        Response::Ok
+    }
+
+    fn commit_log(&self) -> Response {
+        match self.archive.list() {
+            Ok(revisions) => Response::Revisions { revisions },
+            Err(e) => internal("reading the archive", e),
         }
     }
 

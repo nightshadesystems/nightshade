@@ -29,6 +29,7 @@ fn commit(session: &SessionId) -> Request {
     Request::Commit {
         session: session.clone(),
         comment: None,
+        confirm_minutes: None,
     }
 }
 
@@ -38,7 +39,11 @@ fn expect_committed(response: Response) -> (u64, Vec<String>) {
         Response::Committed {
             generation,
             changes,
-        } => (generation, changes.iter().map(ToString::to_string).collect()),
+            confirm_within,
+        } => {
+            assert_eq!(confirm_within, None, "this commit was not a confirm-commit");
+            (generation, changes.iter().map(ToString::to_string).collect())
+        }
         other => panic!("expected a commit, got {other:?}"),
     }
 }
