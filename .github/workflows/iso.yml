@@ -108,6 +108,12 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$APT_CACHE" dist
+          # Guard, not the fix: git records the executable bit, but a commit
+          # made from a Windows checkout (core.fileMode=false) stores 100644 and
+          # the runner then fails with a bare "Permission denied" / exit 126.
+          # The bit belongs in the repo -- `git update-index --chmod=+x` -- and
+          # this line just stops a lost one from costing a CI round trip.
+          chmod +x build/mkimage/mkimage.sh
           # SOURCE_DATE_EPOCH makes the squashfs and ISO timestamps
           # deterministic; the commit date is the natural value for it.
           SOURCE_DATE_EPOCH="$(git log -1 --pretty=%ct)"
