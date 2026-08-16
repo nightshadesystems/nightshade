@@ -1,0 +1,29 @@
+# System-wide settings.
+#
+# Applied first (priority 100). A host name change is what the CLI prompt
+# reads, and the resolver has to be in place before anything that wants to
+# resolve a name.
+
+nodes:
+  system:
+    kind: container
+    help: "System parameters"
+    priority: 100
+    children:
+
+      host-name:
+        kind: leaf
+        type: hostname
+        default: nightshade
+        help: "System host name"
+
+      name-server:
+        kind: multi-leaf
+        type: ip-address
+        help: "Domain name server address"
+
+      time-zone:
+        kind: leaf
+        type: time-zone
+        default: UTC
+        help: "Time zone, as an Area/Location name"

@@ -1,0 +1,48 @@
+# 802.1Q VLAN sub-interfaces.
+#
+# No MAC override: a VLAN inherits its parent's address, and setting one here
+# would be silently ignored by the kernel.
+
+nodes:
+  interfaces:
+    children:
+
+      vlan:
+        kind: tag
+        help: "VLAN interface"
+        priority: 230
+        tag:
+          type: interface-name
+          regex: "^vlan[0-9]+$"
+          help: "VLAN interface name (vlanN)"
+        include: [interface-common]
+        exclude: [mac]
+
+        # The same VLAN twice on the same parent is two interfaces the kernel
+        # will not let coexist. Caught here rather than at apply, where the
+        # second one fails after the first is already up.
+        unique:
+          - [parent, id]
+
+        children:
+
+          parent:
+            kind: leaf
+            type: interface-name
+            required: true
+            help: "Interface this VLAN is carried on"
+            constraints:
+              - rule: value-in-path-set
+                paths:
+                  - "interfaces ethernet *"
+                  - "interfaces bonding *"
+                  - "interfaces bridge *"
+                message: "{value} is not a configured ethernet, bond or bridge interface"
+
+          id:
+            kind: leaf
+            type: uint
+            # 0 is the priority tag and 4095 is reserved.
+            range: {min: 1, max: 4094}
+            required: true
+            help: "802.1Q VLAN ID"

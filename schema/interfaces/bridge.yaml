@@ -1,0 +1,52 @@
+# Layer 2 bridging.
+#
+# Members may be physical ports, bonds or VLANs, so this is applied after all
+# three exist.
+
+nodes:
+  interfaces:
+    children:
+
+      bridge:
+        kind: tag
+        help: "Bridge interface"
+        priority: 220
+        tag:
+          type: interface-name
+          regex: "^br[0-9]+$"
+          help: "Bridge name (brN)"
+        include: [interface-common]
+        children:
+
+          member:
+            kind: multi-leaf
+            type: interface-name
+            help: "Interface to add to this bridge"
+            constraints:
+              - rule: value-in-path-set
+                paths:
+                  - "interfaces ethernet *"
+                  - "interfaces bonding *"
+                  - "interfaces vlan *"
+                message: "{value} is not a configured ethernet, bond or vlan interface"
+
+          stp:
+            kind: flag
+            help: "Enable the spanning tree protocol"
+
+          priority:
+            kind: leaf
+            type: uint
+            # The kernel takes a bridge priority in steps of 4096. Anything
+            # else is rounded down without comment, which quietly elects a
+            # different root bridge than the one that was configured.
+            range: {min: 0, max: 61440, step: 4096}
+            default: 32768
+            help: "Spanning tree bridge priority, in steps of 4096"
+
+          aging-time:
+            kind: leaf
+            type: uint
+            range: {min: 0, max: 1000000}
+            default: 300
+            help: "Seconds a learned MAC address is kept"

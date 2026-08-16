@@ -1,0 +1,86 @@
+# VXLAN tunnels.
+#
+# Applied last: a VXLAN can reference any other interface type as its source,
+# and nothing references a VXLAN.
+
+nodes:
+  interfaces:
+    children:
+
+      vxlan:
+        kind: tag
+        help: "VXLAN interface"
+        priority: 240
+        tag:
+          type: interface-name
+          regex: "^vxlan[0-9]+$"
+          help: "VXLAN interface name (vxlanN)"
+        include: [interface-common]
+
+        # A VNI is the tunnel's identity. Two interfaces claiming one is not a
+        # configuration, it is a coin toss.
+        unique:
+          - [vni]
+
+        # Unicast to a single remote, or multicast to a group. Both is not a
+        # mode the kernel has.
+        mutually-exclusive:
+          - [remote, group]
+
+        children:
+
+          vni:
+            kind: leaf
+            type: uint
+            range: {min: 1, max: 16777215}
+            required: true
+            help: "VXLAN network identifier"
+
+          remote:
+            kind: leaf
+            type: ip-address
+            help: "Unicast address of the remote tunnel endpoint"
+
+          group:
+            kind: leaf
+            type: multicast-address
+            help: "Multicast group carrying this VXLAN"
+            constraints:
+              # A multicast group has to be joined on some interface, and the
+              # kernel will not guess which.
+              - rule: path-exists
+                path: "interfaces vxlan @ source-interface"
+                message: "a multicast group also needs source-interface, to say which interface joins it"
+
+          source-address:
+            kind: leaf
+            type: ip-address
+            help: "Local address to originate tunnel traffic from"
+
+          source-interface:
+            kind: leaf
+            type: interface-name
+            help: "Local interface to originate tunnel traffic from"
+            constraints:
+              - rule: value-in-path-set
+                paths:
+                  - "interfaces ethernet *"
+                  - "interfaces bonding *"
+                  - "interfaces bridge *"
+                  - "interfaces vlan *"
+                message: "{value} is not a configured interface"
+
+          port:
+            kind: leaf
+            type: port
+            # The IANA assignment. Linux historically defaulted to 8472, which
+            # is why this is stated rather than left to the kernel.
+            default: 4789
+            help: "Destination UDP port"
+
+          ttl:
+            kind: leaf
+            type: uint
+            range: {min: 1, max: 255}
+            default: 64
+            help: "TTL on outgoing tunnel packets"

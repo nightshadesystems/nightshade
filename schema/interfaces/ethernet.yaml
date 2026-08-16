@@ -1,0 +1,30 @@
+# Physical ports. Everything else is built on top of these, so they are
+# applied first.
+
+nodes:
+  interfaces:
+    children:
+
+      ethernet:
+        kind: tag
+        help: "Ethernet interface"
+        priority: 200
+        tag:
+          type: interface-name
+          help: "Interface name, as the kernel names it (eth0, enp1s0)"
+        include: [interface-common]
+        children:
+
+          speed:
+            kind: leaf
+            type: enum
+            values: [auto, 10, 100, 1000, 2500, 10000, 25000, 40000, 100000]
+            default: auto
+            help: "Link speed in Mbit/s, or auto to negotiate"
+
+          duplex:
+            kind: leaf
+            type: enum
+            values: [auto, half, full]
+            default: auto
+            help: "Duplex mode, or auto to negotiate"

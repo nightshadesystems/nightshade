@@ -1,0 +1,76 @@
+# Network interfaces: the container, the leaves every interface type shares,
+# and the two rules that are about the config as a whole rather than about any
+# one node.
+#
+# Each interface type lives in interfaces/, and merges into the `children` map
+# below.
+
+templates:
+
+  # Available on every interface type unless that type excludes it. Defined
+  # once so that changing the MTU range changes it for bonds and bridges too,
+  # rather than for five of the six.
+  interface-common:
+
+    address:
+      kind: multi-leaf
+      type: ip-prefix
+      accepts: [dhcp]
+      help: "IP address and prefix length, or dhcp"
+
+    description:
+      kind: leaf
+      type: string
+      help: "Free-text description"
+
+    mtu:
+      kind: leaf
+      type: uint
+      range: {min: 68, max: 9216}
+      default: 1500
+      help: "Maximum transmission unit"
+
+    mac:
+      kind: leaf
+      type: mac-address
+      help: "Override the hardware address"
+
+    disable:
+      kind: flag
+      help: "Administratively disable this interface"
+
+nodes:
+  interfaces:
+    kind: container
+    help: "Network interfaces"
+    priority: 200
+    children: {}
+
+global-constraints:
+
+  # Rules that belong to no single node.
+  #
+  # Everything else is a property of one leaf and hangs off it. These two are
+  # statements about the union of several multi-leaves in different subtrees,
+  # so there is nothing to attach them to.
+
+  # An interface can be enslaved once. Two masters both claiming it produces a
+  # box where which one wins depends on the order networkd got to them.
+  - rule: unique-across
+    paths:
+      - "interfaces bonding * member"
+      - "interfaces bridge * member"
+    message: "{value} is a member of more than one bond or bridge"
+
+  # Layer 3 belongs on the master. An address on an enslaved port is silently
+  # unreachable, which is the worst way for a mistake to behave.
+  - rule: forbid-child-on-referenced
+    references:
+      - "interfaces bonding * member"
+      - "interfaces bridge * member"
+    search:
+      - "interfaces ethernet"
+      - "interfaces bonding"
+      - "interfaces vlan"
+    forbid: address
+    message: "{value} is a member of {referrer}, so it cannot have an address of its own; configure the address on {referrer}"

@@ -1,0 +1,26 @@
+# Loopback.
+#
+# `lo` is the only permitted instance -- the kernel has exactly one, and a
+# schema that lets an operator configure `lo1` is a schema that lets them
+# commit a config that cannot be applied.
+#
+# No MTU, no MAC override, no disable: none of them mean anything on loopback,
+# and no dhcp on the address, because there is nothing to ask.
+
+nodes:
+  interfaces:
+    children:
+
+      loopback:
+        kind: tag
+        help: "Loopback interface"
+        priority: 190
+        tag:
+          type: enum
+          values: [lo]
+          help: "Loopback interface name"
+        include: [interface-common]
+        exclude: [mtu, mac, disable]
+        children:
+          address:
+            accepts: []

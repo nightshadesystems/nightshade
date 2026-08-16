@@ -1,0 +1,72 @@
+# Link aggregation.
+#
+# Applied after ethernet, because a bond cannot enslave a port that does not
+# exist yet, and before the bridges and VLANs that may sit on top of it.
+
+nodes:
+  interfaces:
+    children:
+
+      bonding:
+        kind: tag
+        help: "Bonded interface"
+        priority: 210
+        tag:
+          type: interface-name
+          regex: "^bond[0-9]+$"
+          help: "Bond name (bondN)"
+        include: [interface-common]
+        children:
+
+          member:
+            kind: multi-leaf
+            type: interface-name
+            help: "Ethernet interface to enslave"
+            constraints:
+              - rule: value-in-path-set
+                paths: ["interfaces ethernet *"]
+                message: "{value} is not a configured ethernet interface; a bond can only enslave physical ports"
+
+          mode:
+            kind: leaf
+            type: enum
+            values: [802.3ad, active-backup, balance-xor, broadcast, balance-tlb, balance-alb]
+            default: 802.3ad
+            help: "Bonding mode"
+
+          hash-policy:
+            kind: leaf
+            type: enum
+            values: [layer2, layer2+3, layer3+4]
+            default: layer3+4
+            help: "Transmit hash policy for the balancing modes"
+
+          lacp-rate:
+            kind: leaf
+            type: enum
+            values: [slow, fast]
+            default: slow
+            help: "LACPDU rate in 802.3ad mode"
+
+          min-links:
+            kind: leaf
+            type: uint
+            range: {min: 0, max: 32}
+            default: 0
+            help: "Links that must be up before the bond is carrier-up"
+
+          primary:
+            kind: leaf
+            type: interface-name
+            help: "Member preferred while it is up (active-backup only)"
+            constraints:
+              # Order matters for the message an operator sees: naming a member
+              # of another bond is the more likely mistake, so it is checked
+              # first and gets the more specific wording.
+              - rule: value-in-path-set
+                paths: ["interfaces bonding @ member"]
+                message: "{value} is not a member of this bond"
+              - rule: path-has-value
+                path: "interfaces bonding @ mode"
+                value: active-backup
+                message: "primary only applies in active-backup mode"

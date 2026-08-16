@@ -51,7 +51,49 @@
 pub mod config;
 pub mod curly;
 pub mod lex;
+pub mod loader;
+pub mod model;
 pub mod path;
+pub mod validate;
+pub mod value;
 
 pub use config::{ConfigTree, Node};
+pub use loader::SchemaError;
+pub use model::{NodeInfo, NodeKind, Schema, SchemaNode};
 pub use path::Path;
+pub use validate::{ConstraintViolation, SetError};
+pub use value::{ValueError, ValueSpec, ValueType};
+
+/// The schema compiled in by `build.rs`.
+///
+/// `model.rs` deliberately does not implement this itself: the build script
+/// compiles that file on its own to generate the schema, and an `impl` there
+/// would drag the config tree and the config format into the build script with
+/// it.
+impl curly::TagOracle for Schema {
+    fn is_tag_node(&self, path: &Path) -> bool {
+        Schema::is_tag_node(self, path)
+    }
+}
+
+/// The schema, compiled into the binary.
+///
+/// `build.rs` reads `schema/` at build time and emits the Rust that builds
+/// this. Two things follow. A binary cannot start with a broken schema,
+/// because a schema that does not load fails the build instead. And nothing
+/// on the appliance goes looking for `schema/` on disk, so there is no
+/// directory an operator can edit into a box that will not come up.
+///
+/// The runtime loader still exists, for tooling and tests, and
+/// `generated_matches_the_source_files` asserts the two agree.
+mod generated {
+    include!(concat!(env!("OUT_DIR"), "/schema.rs"));
+}
+
+impl Schema {
+    /// The compiled-in schema. Built once.
+    pub fn compiled() -> &'static Schema {
+        static SCHEMA: std::sync::OnceLock<Schema> = std::sync::OnceLock::new();
+        SCHEMA.get_or_init(generated::schema)
+    }
+}
