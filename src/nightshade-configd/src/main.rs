@@ -10,7 +10,47 @@ use nightshade_schema::model::Schema;
 use tokio::sync::watch;
 use tracing::{error, info};
 
+const USAGE: &str = "\
+usage: nightshade-configd [options]
+
+  --version      print the version and exit
+  -h, --help     this
+
+Normally started by systemd from nightshade-configd.socket. Run by hand it
+creates the socket itself, which is useful for debugging and is not how it runs
+on an appliance.
+";
+
 fn main() -> ExitCode {
+    // Arguments first, before logging is set up and long before anything is
+    // bound. `--version` in particular must never start the daemon: it is what
+    // the image build runs to check the binary works inside the image, and a
+    // `--version` that starts listening does not fail that check -- it hangs
+    // it, which stops a build rather than failing one.
+    // Every option here is terminal and there are no positional arguments, so
+    // this matches the whole list rather than iterating it. That also catches
+    // `--version --help`, which iterating would have silently answered with
+    // whichever came first.
+    let arguments: Vec<String> = std::env::args().skip(1).collect();
+    match arguments.iter().map(String::as_str).collect::<Vec<_>>().as_slice() {
+        [] => {}
+        ["--version"] => {
+            println!("nightshade-configd {VERSION}");
+            return ExitCode::SUCCESS;
+        }
+        ["-h" | "--help"] => {
+            print!("{USAGE}");
+            return ExitCode::SUCCESS;
+        }
+        other => {
+            eprintln!(
+                "nightshade-configd: `{}` is not how this is run\n\n{USAGE}",
+                other.join(" ")
+            );
+            return ExitCode::FAILURE;
+        }
+    }
+
     logging::init();
 
     match run() {

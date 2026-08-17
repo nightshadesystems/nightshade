@@ -95,8 +95,14 @@ install -d -m 0700 -o root -g root /var/lib/nightshade/last-applied
 # The binaries were built on the host and have to run in the image. This is
 # the same check the installer gets: a glibc mismatch fails the build here
 # rather than at 2am on a console with nothing else on it.
+#
+# Under `timeout`, and both failures are fatal. A gate that can hang is worse
+# than no gate at all -- it stops a build instead of failing one, and the
+# symptom is a CI job that just sits there. That is not hypothetical: the first
+# version of this ran `nightshade-configd --help` against a binary that did not
+# parse arguments, so it started the daemon and waited for connections.
 log "checking the binaries run in this image"
-/usr/sbin/nightshade-configd --help >/dev/null 2>&1 \
-    || /usr/sbin/nightshade-configd --version >/dev/null 2>&1 \
-    || true
-/usr/bin/ns --version >/dev/null || die "ns does not run in this image"
+timeout 10 /usr/sbin/nightshade-configd --version >/dev/null \
+    || die "nightshade-configd does not run in this image"
+timeout 10 /usr/bin/ns --version >/dev/null \
+    || die "ns does not run in this image"
