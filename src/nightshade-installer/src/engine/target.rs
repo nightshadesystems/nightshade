@@ -87,6 +87,169 @@ pub fn write_fstab(esps: &[Esp]) -> Result<()> {
     write_target_file("/etc/fstab", &fstab, 0o644)
 }
 
+/// Directories a bare PAM module name is resolved against, target-relative.
+const PAM_MODULE_DIRS: &[&str] = &[
+    "/lib/x86_64-linux-gnu/security",
+    "/usr/lib/x86_64-linux-gnu/security",
+    "/lib/security",
+    "/usr/lib/security",
+];
+
+/// Every PAM module the console login stack names must exist on disk.
+///
+/// This is checked because of how the failure presents. `login` reports a PAM
+/// stack it could not run as "Login incorrect" -- byte for byte identical to a
+/// mistyped password -- and writes the actual reason to the journal and nowhere
+/// else. Root is locked on a Nightshade box and there is no second account, so
+/// a single missing .so is an appliance that cannot be logged into, with the
+/// operator staring at a message telling them their correct password is wrong.
+///
+/// Fatal, not a warning. Finishing an install that produces a machine nobody
+/// can enter is worse than stopping on disks that are going to be repartitioned
+/// on the next attempt anyway.
+pub fn verify_pam_stack(step: &mut Stepper) -> Result<()> {
+    let root = Path::new(TARGET);
+    let dir = root.join("etc/pam.d");
+
+    let mut seen = std::collections::BTreeSet::new();
+    let mut missing_files = Vec::new();
+    let mut missing_modules = Vec::new();
+
+    for entry in ["login", "su", "sudo"] {
+        walk_pam_file(
+            root,
+            &dir,
+            entry,
+            &mut seen,
+            &mut missing_files,
+            &mut missing_modules,
+        );
+    }
+
+    if missing_files.is_empty() && missing_modules.is_empty() {
+        step.detail(format!("PAM stack verified ({} files)", seen.len()));
+        return Ok(());
+    }
+
+    let mut detail = String::new();
+    if !missing_files.is_empty() {
+        detail.push_str(&format!(
+            "\n  missing /etc/pam.d files: {}",
+            missing_files.join(", ")
+        ));
+    }
+    if !missing_modules.is_empty() {
+        detail.push_str(&format!(
+            "\n  missing modules: {}",
+            missing_modules.join(", ")
+        ));
+    }
+    Err(Error::env(format!(
+        "the target's PAM configuration is incomplete, so the installed system \
+         would reject every login with \"Login incorrect\" no matter what \
+         password was typed.{detail}"
+    )))
+}
+
+/// Read one pam.d file, following `@include`, recording anything absent.
+fn walk_pam_file(
+    root: &Path,
+    dir: &Path,
+    name: &str,
+    seen: &mut std::collections::BTreeSet<String>,
+    missing_files: &mut Vec<String>,
+    missing_modules: &mut Vec<String>,
+) {
+    // @include cycles are legal to write and would otherwise recurse forever.
+    if !seen.insert(name.to_string()) {
+        return;
+    }
+
+    let Ok(text) = fs::read_to_string(dir.join(name)) else {
+        // Only the entry points are required to exist. A stack that includes a
+        // file which is not there is broken either way, so both are reported.
+        missing_files.push(name.to_string());
+        return;
+    };
+
+    for line in text.lines() {
+        if let Some(included) = pam_include(line) {
+            walk_pam_file(root, dir, included, seen, missing_files, missing_modules);
+        } else if let Some(rule) = pam_rule(line) {
+            // Only modules whose absence actually refuses the login. An
+            // `optional` module that went missing is untidy; a `required` one
+            // is a locked door.
+            if rule.blocks_login && !pam_module_exists(root, rule.module) {
+                missing_modules.push(format!("{} ({name})", rule.module));
+            }
+        }
+    }
+}
+
+/// The file an `@include` line pulls in.
+fn pam_include(line: &str) -> Option<&str> {
+    let rest = line.trim().strip_prefix("@include")?;
+    let name = rest.trim();
+    if name.is_empty() { None } else { Some(name) }
+}
+
+/// One rule of a pam.d file.
+struct PamRule<'a> {
+    module: &'a str,
+    /// Whether a missing module would refuse the login rather than be shrugged
+    /// off. This is the whole point of parsing the control field: PAM answers
+    /// "module not found" with PAM_MODULE_UNKNOWN, and what that does to the
+    /// stack depends entirely on how the rule was written.
+    blocks_login: bool,
+}
+
+/// Parse `type control module args...`, if the line is a rule at all.
+///
+/// The module is found by scanning for the `.so` token rather than by counting
+/// columns, because the control field can be a bracketed list containing spaces
+/// (`auth [success=1 default=ignore] pam_unix.so`) and so occupies a variable
+/// number of them.
+fn pam_rule(line: &str) -> Option<PamRule<'_>> {
+    let uncommented = line.split('#').next().unwrap_or("");
+    let tokens: Vec<&str> = uncommented.split_whitespace().collect();
+    let kind = *tokens.first()?;
+
+    let module_at = tokens.iter().position(|t| t.ends_with(".so"))?;
+    // A rule whose module is its first token is not a rule; it is a stray line.
+    if module_at == 0 {
+        return None;
+    }
+    let module = tokens[module_at];
+    let control = tokens[1..module_at].join(" ").to_ascii_lowercase();
+
+    // A leading '-' on the type is PAM's own "this module is allowed to be
+    // absent, do not even log it". Taking that at its word.
+    let blocks_login = !kind.starts_with('-')
+        && !control.contains("module_unknown=ignore")
+        && (control.contains("required")
+            || control.contains("requisite")
+            // Bracketed forms: an unlisted return (which PAM_MODULE_UNKNOWN
+            // will be) lands on `default`.
+            || control.contains("default=die")
+            || control.contains("default=bad"));
+
+    Some(PamRule {
+        module,
+        blocks_login,
+    })
+}
+
+fn pam_module_exists(root: &Path, module: &str) -> bool {
+    let relative = module.strip_prefix('/');
+    match relative {
+        // An absolute path in a rule is used as given.
+        Some(path) => root.join(path).exists(),
+        None => PAM_MODULE_DIRS
+            .iter()
+            .any(|d| root.join(d.trim_start_matches('/')).join(module).exists()),
+    }
+}
+
 pub fn set_hostname(config: &InstallConfig) -> Result<()> {
     let host = &config.hostname;
     write_target_file("/etc/hostname", &format!("{host}\n"), 0o644)?;
@@ -186,6 +349,45 @@ pub fn create_account(config: &InstallConfig) -> Result<()> {
     ));
     Cmd::new("chpasswd").in_chroot(TARGET).stdin_secret(line).run()?;
 
+    // Prove it landed. chpasswd is PAM-aware on Debian, and an exit status of
+    // zero is not by itself evidence that /etc/shadow changed. This is the only
+    // account on the box and root is locked immediately below, so a password
+    // that quietly did not take produces an appliance nobody can log into --
+    // discovered at the login prompt, after the pools have been exported.
+    //
+    // Nothing here touches the password itself: the check is on the SHAPE of the
+    // second shadow field. A real hash starts with "$"; "!" is locked, "*" is
+    // "no password login", and empty is no password at all.
+    let entry = Cmd::new("getent")
+        .in_chroot(TARGET)
+        .arg("shadow")
+        .arg(DEFAULT_USER)
+        .run_lenient()?;
+    let field = entry
+        .trimmed()
+        .split(':')
+        .nth(1)
+        .unwrap_or("")
+        .to_string();
+    if !field.starts_with('$') {
+        let state = match field.as_str() {
+            "" => "empty",
+            "!" | "!!" => "locked (!)",
+            "*" => "disabled (*)",
+            _ => "not a password hash",
+        };
+        return Err(Error::env(format!(
+            "the password for {DEFAULT_USER} did not take: its /etc/shadow field \
+             is {state}.\n\
+             The installed system would reject every login and root is locked."
+        )));
+    }
+    logging::info(format!(
+        "password set for {DEFAULT_USER} ({} chars, hash method {})",
+        config.password.len(),
+        field.split('$').nth(1).unwrap_or("?")
+    ));
+
     // Root has no password and cannot be logged into; administration is sudo
     // from the nightshade account.
     Cmd::new("passwd").in_chroot(TARGET).arg("--lock").arg("root").run()?;
@@ -265,4 +467,63 @@ fn write_target_file(relative: &str, contents: &str, mode: u32) -> Result<()> {
 
     logging::info(format!("wrote {} (mode {:o})", path.display(), mode));
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn include_lines_are_recognised() {
+        assert_eq!(pam_include("@include common-auth"), Some("common-auth"));
+        assert_eq!(pam_include("  @include  common-session  "), Some("common-session"));
+        assert_eq!(pam_include("auth required pam_unix.so"), None);
+        assert_eq!(pam_include("@include"), None);
+    }
+
+    fn rule(line: &str) -> (&str, bool) {
+        let r = pam_rule(line).expect("should parse as a rule");
+        (r.module, r.blocks_login)
+    }
+
+    #[test]
+    fn modules_are_found_whatever_column_they_are_in() {
+        assert_eq!(rule("auth required pam_unix.so nullok").0, "pam_unix.so");
+        // A bracketed control field moves the module along by two tokens.
+        assert_eq!(
+            rule("auth [success=1 default=ignore] pam_unix.so try_first_pass").0,
+            "pam_unix.so"
+        );
+        assert_eq!(
+            rule("session optional /lib/security/pam_custom.so").0,
+            "/lib/security/pam_custom.so"
+        );
+    }
+
+    #[test]
+    fn comments_and_blanks_are_not_rules() {
+        assert!(pam_rule("# auth required pam_unix.so").is_none());
+        assert!(pam_rule("").is_none());
+        assert!(pam_rule("   ").is_none());
+        assert_eq!(rule("auth required pam_unix.so # pam_deny.so").0, "pam_unix.so");
+    }
+
+    #[test]
+    fn only_rules_that_would_refuse_the_login_are_blocking() {
+        // These lock the operator out if the .so is gone.
+        assert!(rule("auth required pam_unix.so").1);
+        assert!(rule("auth requisite pam_nologin.so").1);
+        assert!(rule("auth [success=ok user_unknown=bad default=die] pam_securetty.so").1);
+
+        // These do not.
+        assert!(!rule("auth optional pam_cap.so").1);
+        assert!(!rule("session optional pam_motd.so motd=/run/motd.dynamic").1);
+        assert!(!rule("auth sufficient pam_rootok.so").1);
+        assert!(!rule("auth [success=1 default=ignore] pam_unix.so").1);
+        // PAM's own "allowed to be absent" marker on the type field.
+        assert!(!rule("-session optional pam_systemd.so").1);
+        assert!(!rule("-auth required pam_something.so").1);
+        // An explicit module_unknown=ignore overrides a die default.
+        assert!(!rule("session [module_unknown=ignore default=die] pam_selinux.so").1);
+    }
 }

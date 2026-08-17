@@ -83,6 +83,79 @@ for p in $BUILD_ONLY; do
 done
 log "ZFS module intact, no compiler or build-only package present"
 
+# --- the login stack ------------------------------------------------------
+# `login` reports a PAM stack it could not run as "Login incorrect" -- byte for
+# byte what a mistyped password looks like -- and writes the real reason to the
+# journal and nowhere else. Root is locked on a Nightshade box and there is no
+# second account, so one .so that `apt-get autoremove` took above is an
+# appliance nobody can get into, discovered at a login prompt by someone with
+# no way to find out why. Cheaper to catch here as a build failure.
+#
+# The installer repeats this check after it purges the live layer, which is the
+# only other point in the lifecycle where packages come off.
+log "gate: every PAM module the login stack names is installed"
+PAM_FILES=""
+for f in login su sudo; do
+    if [ ! -f "/etc/pam.d/$f" ]; then
+        die "/etc/pam.d/$f is missing; console login would be impossible"
+    fi
+    PAM_FILES="$PAM_FILES /etc/pam.d/$f"
+done
+# @include pulls the common-* stacks into all three; check them too.
+for c in /etc/pam.d/common-auth /etc/pam.d/common-account \
+         /etc/pam.d/common-session /etc/pam.d/common-password; do
+    if [ ! -s "$c" ]; then
+        die "$c is missing or empty; pam-auth-update did not run properly"
+    fi
+    PAM_FILES="$PAM_FILES $c"
+done
+
+# Only modules whose absence would actually refuse a login. PAM answers a
+# missing module with PAM_MODULE_UNKNOWN, and what that does to the stack is
+# entirely up to the control field: `required`/`requisite`, or a bracketed
+# `default=die|bad`, turn it into a refusal; `optional`, `sufficient` and a
+# leading `-` on the type shrug it off. Flagging the harmless ones would fail
+# good builds -- pam_cap.so and pam_motd.so are optional and routinely absent.
+extract_blocking_modules() {
+    # shellcheck disable=SC2086
+    sed 's/#.*//' $PAM_FILES | awk '
+        NF < 3    { next }
+        $1 ~ /^-/ { next }   # PAM: "may be absent, do not even log it"
+        {
+            module = ""
+            for (i = 2; i <= NF; i++) if ($i ~ /\.so$/) { module = $i; at = i; break }
+            if (module == "") next
+            control = ""
+            for (i = 2; i < at; i++) control = control " " tolower($i)
+            if (control ~ /module_unknown[ ]*=[ ]*ignore/) next
+            if (control ~ /required/ || control ~ /requisite/ \
+                || control ~ /default[ ]*=[ ]*die/ || control ~ /default[ ]*=[ ]*bad/) print module
+        }
+    ' | sort -u
+}
+
+PAM_MISSING=""
+for mod in $(extract_blocking_modules); do
+    found=""
+    case "$mod" in
+        /*) if [ -f "$mod" ]; then found=yes; fi ;;
+        *)
+            for d in /lib/x86_64-linux-gnu/security /usr/lib/x86_64-linux-gnu/security \
+                     /lib/security /usr/lib/security; do
+                if [ -f "$d/$mod" ]; then found=yes; break; fi
+            done
+            ;;
+    esac
+    if [ -z "$found" ]; then
+        PAM_MISSING="$PAM_MISSING $mod"
+    fi
+done
+if [ -n "$PAM_MISSING" ]; then
+    die "PAM modules are referenced by /etc/pam.d but not installed:$PAM_MISSING
+  Every login on the installed system would be refused with 'Login incorrect'."
+fi
+log "PAM login stack is complete"
+
 # --- documentation --------------------------------------------------------
 # The dpkg path-exclude rules from hook 0100 cover everything installed after
 # they were written, but debootstrap's own unpack predates them.

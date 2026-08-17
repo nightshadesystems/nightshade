@@ -42,6 +42,7 @@ const REQUIRED_TOOLS: &[&str] = &[
     "cp",
     "chmod",
     "chpasswd",
+    "getent",
     "useradd",
     "passwd",
     "visudo",
@@ -199,11 +200,19 @@ fn install(
     step.detail(format!("from {}", source.display()));
     rootfs::copy_to_target(&source, Path::new(config::TARGET))?;
 
+    // Before anything is run inside the chroot, not just before grub-install.
+    // Stripping the live layer purges packages, which runs maintainer scripts,
+    // and a postrm that cannot see /proc, /dev or /sys does not reliably fail --
+    // it quietly does the wrong thing, and the damage is only found later by
+    // whatever depended on what it touched.
+    session.bind_mounts = target::bind_pseudo_filesystems()?;
+
     step.begin("Removing live-only components");
     rootfs::strip_live_layer(&mut step)?;
+    // The one step of an install that uninstalls anything just ran.
+    target::verify_pam_stack(&mut step)?;
 
     step.begin("Configuring the target system");
-    session.bind_mounts = target::bind_pseudo_filesystems()?;
     target::write_fstab(&esps)?;
     target::set_hostname(config)?;
     target::enable_zfs_services(&mut step)?;

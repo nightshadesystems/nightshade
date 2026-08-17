@@ -1,0 +1,76 @@
+#!/bin/sh
+# /etc/grub.d/09_nightshade_gfx -- graphical console and theme, installed system.
+#
+# Written into the target by nightshade-installer from
+# /usr/share/nightshade/nightshade-gfx.in, then run by grub-mkconfig. Runs after
+# 00_header and before 10_linux, so the terminal is already graphical by the time
+# the first menuentry is emitted.
+#
+# This exists because 00_header's own gfxterm handoff is not something the
+# branded menu can be staked on:
+#
+#   1. With GRUB_TERMINAL_OUTPUT="gfxterm serial" it emits
+#      `terminal_output gfxterm serial` as a SINGLE command. GRUB validates every
+#      terminal name before it applies any of them, so on a machine whose UART is
+#      absent or refused -- where the bare `serial` command 00_header emitted
+#      just above failed and therefore never registered a `serial` terminal --
+#      the whole line fails and the output terminal stays `console`. gfxterm is
+#      never activated. The theme is loaded, `set theme=` is in grub.cfg, nothing
+#      ever draws it, and the operator gets the stock blue text menu with no hint
+#      as to why.
+#
+#   2. Its font guard is `loadfont unicode`, i.e. $prefix/fonts/unicode.pf2 --
+#      whatever grub-install happened to leave behind. If that one file is not
+#      readable the entire gfxterm block is skipped, including `insmod gfxterm`,
+#      which then takes the terminal_output line down with it. The fonts the
+#      theme actually names live in the theme directory and are the ones worth
+#      gating on.
+#
+# So Nightshade does the handoff itself, in the same order as the ISO menu
+# (build/grub/grub.cfg.in, which is known to work), and treats serial as an
+# addition to a working graphical console rather than a precondition for one.
+#
+# grub-mkconfig sources /etc/default/grub and exports GRUB_* to this script, so
+# the mode and the serial parameters still have exactly one definition:
+# build/grub/default-grub.in.
+
+set -e
+
+: "${GRUB_GFXMODE:=1024x768,800x600,auto}"
+: "${GRUB_SERIAL_COMMAND:=serial --unit=0 --speed=115200}"
+
+# Unquoted heredoc: ${GRUB_*} are substituted here and now, \$prefix is passed
+# through for GRUB itself to expand at boot.
+cat <<EOF
+
+### BEGIN Nightshade graphical console ###
+insmod all_video
+insmod gfxterm
+insmod gfxmenu
+insmod png
+
+set gfxmode=${GRUB_GFXMODE}
+set gfxpayload=keep
+
+# Every step is guarded. A machine with no usable GOP, or a /boot that lost its
+# theme, must still get a plain menu that boots -- not a blank screen.
+if terminal_output gfxterm; then
+  if loadfont \$prefix/themes/nightshade/mono16.pf2; then
+    loadfont \$prefix/themes/nightshade/mono24.pf2
+    if [ -f \$prefix/themes/nightshade/theme.txt ]; then
+      set theme=\$prefix/themes/nightshade/theme.txt
+      export theme
+    fi
+  fi
+fi
+
+# Serial is added to whatever is already working, never in place of it. The
+# guard is the whole point: naming a serial terminal that was never registered
+# fails the command outright and would throw away the gfxterm output set above.
+insmod serial
+if ${GRUB_SERIAL_COMMAND}; then
+  terminal_input console serial
+  terminal_output gfxterm serial
+fi
+### END Nightshade graphical console ###
+EOF

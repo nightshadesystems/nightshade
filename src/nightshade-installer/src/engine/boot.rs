@@ -15,6 +15,13 @@ use crate::logging;
 const THEME_SOURCE: &str = "/usr/share/nightshade/grub-theme";
 const FONTS_SOURCE: &str = "/usr/share/nightshade/grub-fonts";
 const DEFAULT_GRUB_TEMPLATE: &str = "/usr/share/nightshade/default-grub.in";
+const GFX_SCRIPT_TEMPLATE: &str = "/usr/share/nightshade/nightshade-gfx.in";
+
+/// Where the gfx drop-in lands in the target. 09 puts it after 00_header (which
+/// sets up the environment and, with our /etc/default/grub, leaves the terminal
+/// alone) and before 10_linux, so the menu is already graphical by the time the
+/// first entry is emitted.
+const GFX_SCRIPT: &str = "/etc/grub.d/09_nightshade_gfx";
 
 /// Theme location on the installed system.
 ///
@@ -119,6 +126,15 @@ pub fn configure_grub() -> Result<()> {
     let default_grub = format!("{TARGET}/etc/default/grub");
     fs::write(&default_grub, &rendered).ctx(format!("writing {default_grub}"))?;
     logging::info(format!("wrote {default_grub}"));
+
+    // The drop-in that switches the menu to gfxterm and applies the theme.
+    // /etc/default/grub deliberately leaves GRUB_TERMINAL_* unset, so without
+    // this file the installed system boots to the stock text menu -- it is not
+    // decoration, and a missing template is a broken image, not a warning.
+    let gfx_src = format!("{TARGET}{GFX_SCRIPT_TEMPLATE}");
+    let gfx = fs::read_to_string(&gfx_src)
+        .ctx(format!("reading the GRUB gfx drop-in at {gfx_src}"))?;
+    write_target_file(GFX_SCRIPT, &gfx, 0o755)?;
 
     // Theme and fonts.
     let theme_src = format!("{TARGET}{THEME_SOURCE}");
@@ -275,6 +291,17 @@ pub fn install_to_esps(esps: &[Esp], step: &mut Stepper) -> Result<()> {
             "the generated boot menu does not reference {ROOT_DATASET}.\n\
              grub-probe did not recognise the ZFS root; the system would not boot."
         )));
+    }
+    // Both halves are checked, because either one alone is a menu that boots and
+    // looks wrong. `set theme=` without gfxterm is the failure that is easy to
+    // miss: the theme is on disk, named in grub.cfg, and never drawn, because
+    // the output terminal is still the firmware console.
+    if !generated.contains("terminal_output gfxterm") {
+        step.warn(
+            "the generated menu never switches to gfxterm; it will boot to the \
+             stock text menu. Check that /etc/grub.d/09_nightshade_gfx is present \
+             and executable in the target.",
+        );
     }
     if !generated.contains("themes/nightshade") {
         step.warn("the generated menu has no theme; it will boot but look unbranded");

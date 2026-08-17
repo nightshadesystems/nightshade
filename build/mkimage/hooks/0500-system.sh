@@ -17,6 +17,33 @@ LANG=en_US.UTF-8
 LC_ALL=en_US.UTF-8
 EOF
 
+# --- journal --------------------------------------------------------------
+# Debian leaves journald at Storage=auto and ships no /var/log/journal, which
+# makes the journal volatile: everything logged during a boot is gone the moment
+# that boot ends. On an appliance whose only way in is a local login, and whose
+# root account is locked, that is the difference between "PAM refused you, here
+# is the module that failed" and a box nobody can enter and nobody can diagnose.
+# `login` reports a broken PAM stack as "Login incorrect" -- identical to a typo
+# -- and the reason it will not say out loud goes to the journal and nowhere
+# else, because no syslog daemon is in the manifest.
+log "making the journal persistent"
+if getent group systemd-journal >/dev/null; then
+    install -d -m 2755 -o root -g systemd-journal /var/log/journal
+else
+    die "the systemd-journal group is missing; systemd is not installed properly"
+fi
+mkdir -p /etc/systemd/journald.conf.d
+cat >/etc/systemd/journald.conf.d/10-nightshade.conf <<'EOF'
+[Journal]
+Storage=persistent
+# Bounded. /var/log is its own dataset on an installed system, but it is not a
+# large one, and an appliance that fills its root pool with logs has failed
+# harder than whatever it was logging about.
+SystemMaxUse=256M
+SystemMaxFileSize=32M
+MaxRetentionSec=1month
+EOF
+
 # --- sshd -----------------------------------------------------------------
 log "disabling sshd by default"
 systemctl disable ssh.service 2>/dev/null || true

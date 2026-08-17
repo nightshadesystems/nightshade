@@ -71,6 +71,11 @@ mkdir -p /usr/share/nightshade/grub-fonts
 cp -a "$OUT/theme" /usr/share/nightshade/grub-theme
 cp "$OUT/fonts"/*.pf2 /usr/share/nightshade/grub-fonts/
 install -m 0644 "$STAGING/grub/default-grub.in" /usr/share/nightshade/default-grub.in
+# The grub.d drop-in that actually turns the graphical menu on. Shipped as data
+# rather than installed into /etc/grub.d here: this image never runs
+# grub-mkconfig on itself, and a live ISO with a stray boot-menu generator in
+# /etc/grub.d is a trap for anyone who runs update-grub while debugging.
+install -m 0644 "$STAGING/grub/nightshade-gfx.in" /usr/share/nightshade/nightshade-gfx.in
 
 # --- standalone EFI binary ------------------------------------------------
 # The embedded config does nothing but find the ISO and hand over to the real

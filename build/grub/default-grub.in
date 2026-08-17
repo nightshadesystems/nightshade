@@ -20,14 +20,29 @@ GRUB_CMDLINE_LINUX_DEFAULT="quiet loglevel=3"
 # root=, so this value is the one the kernel sees.
 GRUB_CMDLINE_LINUX="root=ZFS=@ROOT_DATASET@ console=tty0 console=ttyS0,115200n8"
 
-# Serial mirrors the menu for headless/remote-hands access.
-GRUB_TERMINAL_INPUT="console serial"
-GRUB_TERMINAL_OUTPUT="gfxterm serial"
+# GRUB_TERMINAL_INPUT and GRUB_TERMINAL_OUTPUT are deliberately UNSET.
+#
+# Setting GRUB_TERMINAL_OUTPUT="gfxterm serial" makes 00_header emit
+# `terminal_output gfxterm serial` as one command, and GRUB validates every
+# terminal name before applying any of them. On a machine where the preceding
+# bare `serial` command failed -- no UART, or firmware that will not hand one
+# over -- no `serial` terminal is ever registered, the whole line fails, output
+# stays on the firmware console, and the theme silently never draws. The same
+# setting is also what gates 00_header's font block on a single unrelated file
+# ($prefix/fonts/unicode.pf2).
+#
+# /etc/grub.d/09_nightshade_gfx does the handoff instead, guarding each step
+# separately and adding serial only once the graphical console is already up.
+# It reads GRUB_GFXMODE and GRUB_SERIAL_COMMAND from here, so those two still
+# have exactly one definition.
 GRUB_SERIAL_COMMAND="serial --unit=0 --speed=115200 --word=8 --parity=no --stop=1"
 
 GRUB_GFXMODE=1024x768,800x600,auto
 GRUB_GFXPAYLOAD_LINUX=keep
-GRUB_THEME=/boot/grub/themes/nightshade/theme.txt
+
+# GRUB_THEME is not set for the same reason: 00_header only acts on it when
+# gfxterm is in GRUB_TERMINAL_OUTPUT. 09_nightshade_gfx sets `theme` itself,
+# after it has confirmed gfxterm and the theme's fonts actually came up.
 
 # Appliance: there is nothing else on these disks worth offering to boot, and
 # os-prober on a ZFS mirror is slow and occasionally destructive.
