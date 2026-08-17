@@ -31,6 +31,68 @@ fn main() -> ExitCode {
     ExitCode::from(outcome.code())
 }
 
+/// Was this process started as somebody's login shell?
+///
+/// The convention every shell relies on: `login` execs the shell with an argv[0]
+/// of `-ns` rather than `ns`. It is the only signal available, and it is the one
+/// bash, sh and zsh all use.
+fn is_login_shell() -> bool {
+    std::env::args_os()
+        .next()
+        .map(|argv0| argv0_is_login_shell(&argv0.to_string_lossy()))
+        .unwrap_or(false)
+}
+
+fn argv0_is_login_shell(argv0: &str) -> bool {
+    // The dash is on the basename, so a full path still carries it: `login`
+    // passes `-ns`, but a shell configured with an absolute path arrives as
+    // `-/usr/bin/ns` on some systems.
+    argv0.starts_with('-')
+        || std::path::Path::new(argv0)
+            .file_name()
+            .map(|name| name.to_string_lossy().starts_with('-'))
+            .unwrap_or(false)
+}
+
+/// What to do when the session cannot be started at all.
+///
+/// For a script or an `ns -c`, exiting non-zero is correct and expected.
+///
+/// As a login shell it is a trapdoor. `ns` is the login shell of the only
+/// account on a Nightshade box, root is locked, and there is no second user.
+/// A shell that exits the instant it starts returns the operator to `agetty`,
+/// which clears the screen -- so the console blinks, a fresh `login:` appears,
+/// and the message explaining why is destroyed on its way past. Correct
+/// password, correct account, no diagnosis, no way in.
+///
+/// So in that one case the error is made unmissable and the operator is left in
+/// a shell that can fix the box. This grants nothing: `shell` from operational
+/// mode already drops to bash as the operator's own uid, so the same door is
+/// open on a healthy system. The difference is that here it is the door out of
+/// a machine that would otherwise be unreachable.
+fn no_session(login_shell: bool, message: &str) -> Outcome {
+    if !login_shell {
+        eprintln!("{message}");
+        return Outcome::CommandError;
+    }
+
+    eprintln!("\n{message}\n");
+    eprintln!("Nightshade's configuration system is not answering, so there is no");
+    eprintln!("operational mode to put you in. Dropping to a shell instead, because");
+    eprintln!("the alternative is a console you cannot get past.\n");
+    eprintln!("  systemctl status nightshade-configd.service");
+    eprintln!("  journalctl -u nightshade-configd.service -b");
+    eprintln!("\nFix the daemon and log in again for a normal session.\n");
+
+    match nightshade_cli::shell::run() {
+        Ok(()) => Outcome::CommandError,
+        Err(e) => {
+            eprintln!("ns: the fallback shell could not be started either: {e}");
+            Outcome::CommandError
+        }
+    }
+}
+
 fn run() -> Outcome {
     let mut arguments = std::env::args().skip(1);
     let mut command = None;
@@ -60,13 +122,12 @@ fn run() -> Outcome {
         }
     }
 
+    let login_shell = is_login_shell();
+
     let paths = Paths::system();
     let mut client = match Client::connect(&paths.socket()) {
         Ok(client) => client,
-        Err(e) => {
-            eprintln!("{e}");
-            return Outcome::CommandError;
-        }
+        Err(e) => return no_session(login_shell, &e.to_string()),
     };
     // Fail before the prompt appears rather than on the first command.
     let _ = &mut client;
@@ -78,7 +139,17 @@ fn run() -> Outcome {
         (Some(_), Some(_)) => usage_error("-c and -f cannot both be given"),
         (Some(command), None) => one_shot(&mut cli, &command, json),
         (None, Some(file)) => batch(&mut cli, &file),
-        (None, None) => interactive(&mut cli),
+        (None, None) => {
+            let outcome = interactive(&mut cli);
+            // `exit` returns Ok and should log the operator out; that is the
+            // whole point of it. Anything else means the session died on its
+            // own -- reedline failing to drive the terminal, most likely -- and
+            // for a login shell that is the same trapdoor as never starting.
+            if login_shell && outcome != Outcome::Ok {
+                return no_session(login_shell, "the operational session ended unexpectedly");
+            }
+            outcome
+        }
     }
 }
 
@@ -227,4 +298,28 @@ fn warn_if_boot_failed(paths: &Paths) {
 
 fn history_file() -> Option<std::path::PathBuf> {
     std::env::var_os("HOME").map(|home| std::path::PathBuf::from(home).join(".nightshade_history"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Getting this wrong in either direction matters: miss the dash and the
+    /// only account on the box loses its way out of a broken configd; see one
+    /// that is not there and `ns -c ...` in a script stops failing when it
+    /// should.
+    #[test]
+    fn login_shells_are_recognised_by_the_leading_dash() {
+        assert!(argv0_is_login_shell("-ns"));
+        assert!(argv0_is_login_shell("-nightshade"));
+        assert!(argv0_is_login_shell("-/usr/bin/ns"));
+    }
+
+    #[test]
+    fn ordinary_invocations_are_not_login_shells() {
+        assert!(!argv0_is_login_shell("ns"));
+        assert!(!argv0_is_login_shell("/usr/bin/ns"));
+        assert!(!argv0_is_login_shell("nightshade"));
+        assert!(!argv0_is_login_shell(""));
+    }
 }

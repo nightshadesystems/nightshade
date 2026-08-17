@@ -10,8 +10,12 @@
 [Unit]
 Description=Nightshade configuration daemon socket
 Documentation=https://github.com/zagdrath/nightshade
-# The directory the socket lives in is created by tmpfiles, not by us.
-After=nightshade-tmpfiles.service
+# The directory the socket lives in is created by tmpfiles, not by us. Named
+# correctly: `nightshade-tmpfiles.service` does not exist and never did, and an
+# After= naming a unit that does not exist is silently no ordering at all. The
+# rule lives in /usr/lib/tmpfiles.d/nightshade.conf, which is applied by
+# systemd-tmpfiles-setup.service.
+After=systemd-tmpfiles-setup.service
 
 [Socket]
 ListenStream=/run/nightshade/configd.sock
