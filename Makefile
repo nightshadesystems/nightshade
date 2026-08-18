@@ -87,7 +87,12 @@ QEMU_COMMON = \
 ifeq ($(VM_DISPLAY),none)
 QEMU_DISPLAY = -nographic
 else
-QEMU_DISPLAY = -display $(VM_DISPLAY)
+# virtio rather than the default std VGA. std's framebuffer is dirty-tracked
+# device memory, so every console fill and scroll is paid for write by write --
+# and under TCG (no /dev/kvm, the usual case inside WSL) that makes typing at
+# the guest's console visibly lag. virtio-gpu renders from guest RAM. OVMF and
+# the Debian kernel both carry the driver, so GRUB's theme and fbcon still work.
+QEMU_DISPLAY = -display $(VM_DISPLAY) -vga virtio
 endif
 
 .PHONY: all iso installer test-vm test-vm-disk test-vm-degraded vm-reset clean help

@@ -10,7 +10,7 @@ use nightshade_cli::repl::{Cli, Mode, NsPrompt, Outcome};
 use nightshade_common::paths::Paths;
 use nightshade_schema::model::Schema;
 use reedline::{
-    DefaultHinter, FileBackedHistory, Reedline, Signal,
+    DefaultHinter, FileBackedHistory, Reedline, Signal, SimpleMatchHighlighter,
 };
 
 const USAGE: &str = "\
@@ -224,7 +224,18 @@ fn interactive(cli: &mut Cli) -> Outcome {
             Schema::compiled(),
             Arc::clone(&cli.context),
         )))
-        .with_hinter(Box::new(DefaultHinter::default()));
+        .with_hinter(Box::new(DefaultHinter::default()))
+        // With an empty query this styles nothing: the typed line goes to the
+        // terminal in its default colour, with no escape codes around it.
+        //
+        // Left alone, reedline installs its ExampleHighlighter, which restyles
+        // the whole buffer White -- a colour change and its reset wrapped
+        // around everything typed, re-emitted on every keystroke. `ns` is read
+        // on consoles where every byte is drawn in software (the framebuffer
+        // console of an appliance or a VM) or sent down a serial line, and a
+        // repaint there is paid for per byte. Config text has no syntax to
+        // highlight; the honest style is none.
+        .with_highlighter(Box::new(SimpleMatchHighlighter::default()));
     if let Some(history) = history {
         editor = editor.with_history(history);
     }
