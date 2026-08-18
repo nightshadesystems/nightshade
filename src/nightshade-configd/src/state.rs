@@ -612,6 +612,17 @@ impl Configd {
         if let Err(e) = std::fs::write(&temporary, &text) {
             return internal(format!("writing {}", temporary.display()), e);
         }
+        // 0600 explicitly. `fs::write` creates at 0666 masked by the umask,
+        // which is 0644 for a daemon that inherited root's -- and config.boot
+        // carries the same crypt hashes /etc/shadow does. The 0700 on the
+        // directory already stops a local account reaching it; this is the
+        // second lock, for the day somebody loosens the first.
+        if let Err(e) = std::fs::set_permissions(
+            &temporary,
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        ) {
+            return internal(format!("securing {}", temporary.display()), e);
+        }
         if let Err(e) = std::fs::rename(&temporary, &path) {
             return internal(format!("renaming to {}", path.display()), e);
         }

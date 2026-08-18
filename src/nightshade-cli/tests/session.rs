@@ -230,7 +230,7 @@ fn completion_works_at_every_position() {
     assert_eq!(offered(&cli, "set "), ["interfaces", "system"]);
     assert_eq!(
         offered(&cli, "set system "),
-        ["host-name", "name-server", "time-zone"]
+        ["host-name", "login", "name-server", "time-zone"]
     );
 
     // An interface that is configured is offered by name.

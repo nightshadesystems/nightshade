@@ -617,7 +617,7 @@ fn children_of_drives_completion_at_every_position() {
 
     let system = schema.children_of(&p("system"));
     let names: Vec<&str> = system.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["host-name", "name-server", "time-zone"]);
+    assert_eq!(names, ["host-name", "login", "name-server", "time-zone"]);
     let name_server = system.iter().find(|c| c.name == "name-server").unwrap();
     assert!(name_server.multi);
     assert_eq!(name_server.value.as_deref(), Some("<ip-address>"));
@@ -638,7 +638,7 @@ fn children_of_drives_completion_at_every_position() {
         .collect();
     assert_eq!(
         inside,
-        ["address", "description", "disable", "duplex", "mac", "mtu", "speed"]
+        ["address", "description", "disable", "duplex", "hw-id", "mac", "mtu", "speed"]
     );
 
     // At a leaf, what it takes.
@@ -653,6 +653,22 @@ fn children_of_drives_completion_at_every_position() {
     assert!(address[0].name.contains("dhcp"), "{}", address[0].name);
     let loopback = schema.children_of(&p("interfaces loopback lo address"));
     assert!(!loopback[0].name.contains("dhcp"), "{}", loopback[0].name);
+
+    // An account is a tag node like an interface, and the hash under it is
+    // marked secret so `show` masks it.
+    let login = schema.children_of(&p("system login"));
+    assert_eq!(login.iter().map(|c| c.name.as_str()).collect::<Vec<_>>(), ["user"]);
+    let user = schema.children_of(&p("system login user"));
+    assert_eq!(user.len(), 1);
+    assert!(user[0].placeholder);
+    assert_eq!(user[0].name, "<user>");
+    let user_children = schema.children_of(&p("system login user nightshade"));
+    let inside_user: Vec<&str> = user_children.iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(inside_user, ["authentication", "full-name"]);
+    let secret = schema.children_of(&p("system login user nightshade authentication"));
+    assert_eq!(secret.len(), 1);
+    assert_eq!(secret[0].name, "encrypted-password");
+    assert!(secret[0].secret, "the password hash must be masked by show");
 
     // A flag takes nothing, and an unknown path offers nothing.
     assert!(schema.children_of(&p("interfaces ethernet eth0 disable")).is_empty());

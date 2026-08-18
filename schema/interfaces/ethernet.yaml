@@ -11,9 +11,14 @@ nodes:
         priority: 200
         tag:
           type: interface-name
-          help: "Interface name, as the kernel names it (eth0, enp1s0)"
+          help: "Interface name (eth0, eth1, ...)"
         include: [interface-common]
         children:
+
+          hw-id:
+            kind: leaf
+            type: mac-address
+            help: "Permanent MAC of the port this name is pinned to"
 
           speed:
             kind: leaf

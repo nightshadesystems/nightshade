@@ -17,6 +17,9 @@ use regex::Regex;
 /// Longest interface name the kernel accepts, `IFNAMSIZ - 1`.
 const IFNAMSIZ_MAX: usize = 15;
 
+/// What `useradd` accepts, which is shorter than most people expect.
+const USERNAME_MAX: usize = 32;
+
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[error("{value:?} is not {expected}")]
 pub struct ValueError {
@@ -109,6 +112,16 @@ pub enum ValueType {
     InterfaceName,
     Hostname,
     TimeZone,
+    /// A login name, by the rules `useradd` itself enforces.
+    UserName,
+    /// A crypt(3) hash, never a plaintext password.
+    ///
+    /// The distinction is the point: the configuration is a file an operator
+    /// reads, copies between boxes and keeps in version control, and a
+    /// plaintext password in it is a plaintext password everywhere it has ever
+    /// been. Only the hash is accepted, so there is nothing in the config to
+    /// leak that is not already the thing `/etc/shadow` holds.
+    EncryptedPassword,
     Enum(Vec<String>),
 }
 
@@ -133,6 +146,8 @@ impl ValueType {
             ValueType::InterfaceName => "<interface>".into(),
             ValueType::Hostname => "<hostname>".into(),
             ValueType::TimeZone => "<Area/Location>".into(),
+            ValueType::UserName => "<user>".into(),
+            ValueType::EncryptedPassword => "<crypt-hash>".into(),
             ValueType::Enum(values) => format!("<{}>", values.join("|")),
         }
     }
@@ -159,6 +174,12 @@ impl ValueType {
             }
             ValueType::Hostname => "a valid host name".into(),
             ValueType::TimeZone => "a known time zone, e.g. Europe/London".into(),
+            ValueType::UserName => format!(
+                "a valid login name (lower-case, up to {USERNAME_MAX} characters)"
+            ),
+            ValueType::EncryptedPassword => {
+                "a crypt(3) hash, e.g. $6$... -- not a plaintext password".into()
+            }
             ValueType::Enum(values) => format!("one of: {}", values.join(", ")),
         }
     }
@@ -184,6 +205,8 @@ impl ValueType {
             ValueType::InterfaceName => is_interface_name(value),
             ValueType::Hostname => is_hostname(value),
             ValueType::TimeZone => return check_time_zone(value),
+            ValueType::UserName => is_user_name(value),
+            ValueType::EncryptedPassword => return check_encrypted_password(value),
             ValueType::Enum(values) => values.iter().any(|v| v == value),
         };
         if ok {
@@ -384,6 +407,65 @@ fn is_hostname(value: &str) -> bool {
     })
 }
 
+/// A login name, by the rules `useradd` enforces (NAME_REGEX in adduser(8)).
+///
+/// Lower-case only, and no leading digit: a name that is all digits is
+/// ambiguous with a uid everywhere a name can be given, and the shadow tools
+/// resolve that ambiguity differently from one another.
+fn is_user_name(value: &str) -> bool {
+    if value.is_empty() || value.len() > USERNAME_MAX {
+        return false;
+    }
+    let mut chars = value.chars();
+    let first = chars.next().expect("not empty");
+    if !(first.is_ascii_lowercase() || first == '_') {
+        return false;
+    }
+    // A trailing `$` is legal (Samba machine accounts) and is the one place a
+    // non-alphanumeric may end the name.
+    let rest: Vec<char> = chars.collect();
+    let body = match rest.split_last() {
+        Some((&'$', head)) => head,
+        _ => &rest[..],
+    };
+    body
+        .iter()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || matches!(c, '-' | '_'))
+}
+
+/// A crypt(3) hash, and specifically not a password.
+///
+/// Nothing here judges the strength of what was hashed -- that is not knowable
+/// from a hash, and pretending otherwise would be theatre. What it does refuse
+/// is the mistake that matters: a plaintext password pasted into the field.
+/// Those are caught by shape, because every crypt hash is `$id$...$...` and a
+/// password almost never is.
+///
+/// `!` and `*` are accepted and mean what they mean in `/etc/shadow`: an
+/// account that exists and cannot be logged into with a password. That is a
+/// configuration somebody may want deliberately -- a key-only account -- and
+/// refusing it here would only push them to a worse way of saying it.
+fn check_encrypted_password(value: &str) -> Check {
+    let expected = ValueType::EncryptedPassword.expected();
+    if value == "!" || value == "*" {
+        return Ok(());
+    }
+    // $id$[params$]salt$checksum -- at least three `$` fields, none empty
+    // except the leading one, and no whitespace or `:` anywhere (a `:` would
+    // end the field early in /etc/shadow and corrupt the file).
+    let fields: Vec<&str> = value.split('$').collect();
+    let shaped = value.starts_with('$')
+        && fields.len() >= 4
+        && fields[1..].iter().all(|f| !f.is_empty())
+        && !value.contains(':')
+        && !value.chars().any(|c| c.is_whitespace() || c.is_control());
+    if shaped {
+        Ok(())
+    } else {
+        Err(ValueError::new(value, expected))
+    }
+}
+
 /// A zone name the box actually has.
 ///
 /// Two checks, and the split matters. The shape check is unconditional: a
@@ -429,6 +511,57 @@ mod tests {
         for v in values {
             assert!(ty.check(v).is_err(), "{ty:?} should reject {v:?}");
         }
+    }
+
+    #[test]
+    fn user_names_follow_the_rules_useradd_enforces() {
+        accepts(
+            ValueType::UserName,
+            &["nightshade", "op", "_svc", "a", "user-1", "web$"],
+        );
+        rejects(
+            ValueType::UserName,
+            &[
+                "",
+                "Nightshade",              // upper case
+                "1st",                     // leading digit
+                "12345",                   // all digits: ambiguous with a uid
+                "user name",
+                "user:x",                  // would end the field in /etc/passwd
+                "root/../etc",
+                &"a".repeat(33),
+            ],
+        );
+    }
+
+    /// The field takes a hash. A password pasted into it is the mistake worth
+    /// catching, and it is caught by shape.
+    #[test]
+    fn only_crypt_hashes_are_accepted_as_passwords() {
+        accepts(
+            ValueType::EncryptedPassword,
+            &[
+                "$6$rounds=656000$saltsalt$aVeryLongCheck.sum/With.Slashes0123",
+                "$y$j9T$salt$checksum",
+                "$1$salt$checksum",
+                // Deliberately no password login, which is a real choice.
+                "!",
+                "*",
+            ],
+        );
+        rejects(
+            ValueType::EncryptedPassword,
+            &[
+                "hunter2",                 // the whole point
+                "correct horse battery",
+                "",
+                "$6$salt",                 // truncated: no checksum
+                "$6$$checksum",            // empty field
+                "6$salt$checksum",         // no leading $
+                "$6$salt$check:sum",       // `:` would corrupt /etc/shadow
+                "$6$salt$check sum",
+            ],
+        );
     }
 
     #[test]

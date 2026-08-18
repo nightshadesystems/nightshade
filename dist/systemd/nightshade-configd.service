@@ -69,7 +69,9 @@ ReadWritePaths=/etc
 #   the next restart. Not an allowlist, a re-mask; the allowlist is above.
 ReadOnlyPaths=/etc/passwd /etc/shadow /etc/group /etc/gshadow
 ReadOnlyPaths=/etc/pam.d /etc/sudoers /etc/sudoers.d /etc/ssh
-ReadOnlyPaths=/etc/systemd
+#   ...but not /etc/systemd/network, which is where the .link files that name
+#   the physical ports live and is therefore configd's to write.
+ReadOnlyPaths=/etc/systemd/system /etc/systemd/user
 #   the archive and the last-applied artifacts a failed commit restores from
 ReadWritePaths=/var/lib/nightshade
 #   sessions, running state, the pending-confirm marker, the socket

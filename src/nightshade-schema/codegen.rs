@@ -234,6 +234,8 @@ fn value_type(out: &mut String, ty: &ValueType) {
         ValueType::InterfaceName => "InterfaceName",
         ValueType::Hostname => "Hostname",
         ValueType::TimeZone => "TimeZone",
+        ValueType::UserName => "UserName",
+        ValueType::EncryptedPassword => "EncryptedPassword",
 
         ValueType::Number(Range { min, max, step }) => {
             let step = match step {

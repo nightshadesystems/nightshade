@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(names("set "), ["interfaces", "system"]);
         assert_eq!(
             names("set system "),
-            ["host-name", "name-server", "time-zone"]
+            ["host-name", "login", "name-server", "time-zone"]
         );
     }
 
@@ -304,7 +304,7 @@ mod tests {
     fn inside_an_instance_the_leaves_come_back() {
         assert_eq!(
             names("set interfaces ethernet eth0 "),
-            ["address", "description", "disable", "duplex", "mac", "mtu", "speed"]
+            ["address", "description", "disable", "duplex", "hw-id", "mac", "mtu", "speed"]
         );
         assert_eq!(names("set interfaces ethernet eth0 mt"), ["mtu"]);
     }

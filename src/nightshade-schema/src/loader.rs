@@ -638,6 +638,8 @@ fn value_spec(
         "interface-name" => ValueType::InterfaceName,
         "hostname" => ValueType::Hostname,
         "time-zone" => ValueType::TimeZone,
+        "user-name" => ValueType::UserName,
+        "encrypted-password" => ValueType::EncryptedPassword,
         "enum" => {
             let values = values.ok_or_else(|| {
                 SchemaError::invalid(at, "an `enum` needs the `values` it accepts")

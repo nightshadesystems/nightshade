@@ -218,21 +218,51 @@ fn network_file(name: &str, node: &Node, attachments: &Attachments) -> String {
     ini.finish()
 }
 
-/// The `.link` file, for the properties udev applies rather than networkd.
+/// The `.link` file: what udev applies, including the port's name.
 ///
-/// Only written when there is something to say: an empty `.link` would still
-/// match the interface and override defaults with nothing.
+/// # One file per port, and why it cannot be two
+///
+/// udev does not merge `.link` files. The first one whose `[Match]` succeeds,
+/// in lexical order across every directory it reads, is applied *in full* and
+/// the rest are never looked at. So the name and the port's properties have to
+/// be in the same file -- a separate `00-name.link` would win outright and
+/// silently discard the speed and duplex somebody configured here.
+///
+/// # Matching on the permanent MAC
+///
+/// `hw-id` is the port's burned-in address, and matching on it is what makes
+/// `eth0` mean the same socket on the chassis after a reboot, a kernel
+/// upgrade, or another card being added in front of it. `OriginalName=` cannot
+/// do that job: it matches the name the kernel invented (`ens33`, `enp1s0`),
+/// which is the very thing being renamed, and it changes under exactly the
+/// hardware moves the pin exists to survive.
+///
+/// Without `hw-id` there is nothing to pin to, so the file falls back to
+/// matching the name as given and does not rename anything. That is the case
+/// for a port an operator named by hand, and for `lo`.
+///
+/// Returns `None` when there would be nothing to say: an empty `.link` still
+/// matches, and would override the defaults with nothing.
 fn link_file(name: &str, node: &Node) -> Option<String> {
+    let hw_id = leaf(node, "hw-id");
     let mac = leaf(node, "mac");
     let speed = leaf(node, "speed").filter(|s| *s != "auto");
     let duplex = leaf(node, "duplex").filter(|d| *d != "auto");
-    if mac.is_none() && speed.is_none() && duplex.is_none() {
+    if hw_id.is_none() && mac.is_none() && speed.is_none() && duplex.is_none() {
         return None;
     }
 
     let mut ini = Ini::new();
-    ini.section("Match").key("OriginalName", name);
+    match hw_id {
+        Some(hw_id) => ini.section("Match").key("PermanentMACAddress", hw_id),
+        None => ini.section("Match").key("OriginalName", name),
+    };
     ini.section("Link");
+    // Only when the port was pinned: `Name=` on a file matched by name is a
+    // rename to what it is already called, which udev warns about.
+    if hw_id.is_some() {
+        ini.key("Name", name);
+    }
     ini.maybe("MACAddress", mac);
     // The schema's speeds are megabits, which is what the `M` suffix means.
     ini.maybe("BitsPerSecond", speed.map(|s| format!("{s}M")));
@@ -401,6 +431,10 @@ impl Renderer for NetworkdRenderer {
     fn render(&self, config: &ConfigTree) -> Result<Artifacts, RenderError> {
         let attachments = Attachments::of(config);
         let mut files: BTreeMap<String, String> = BTreeMap::new();
+        // `.link` files live in a different directory from everything else --
+        // a persistent one, because udev reads them before configd exists.
+        // See `Paths::link_dir`.
+        let mut links: BTreeMap<String, String> = BTreeMap::new();
 
         // Physical and loopback: a .network, and a .link when there is
         // something for udev to do.
@@ -411,7 +445,7 @@ impl Renderer for NetworkdRenderer {
                     network_file(name, node, &attachments),
                 );
                 if let Some(link) = link_file(name, node) {
-                    files.insert(physical_file(name, "link"), link);
+                    links.insert(physical_file(name, "link"), link);
                 }
             }
         }
@@ -432,11 +466,18 @@ impl Renderer for NetworkdRenderer {
         }
 
         Ok(Artifacts {
-            managed: vec![Managed {
-                dir: self.paths.networkd_dir(),
-                marker: MANAGED_MARKER.to_string(),
-                files,
-            }],
+            managed: vec![
+                Managed {
+                    dir: self.paths.networkd_dir(),
+                    marker: MANAGED_MARKER.to_string(),
+                    files,
+                },
+                Managed {
+                    dir: self.paths.link_dir(),
+                    marker: MANAGED_MARKER.to_string(),
+                    files: links,
+                },
+            ],
             files: BTreeMap::new(),
             actions: vec![Action::ReloadNetworkd],
         })
@@ -579,11 +620,21 @@ mod tests {
         )
     }
 
+    /// The networkd directory: `.network` and `.netdev`.
     fn rendered(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         let (renderer, _) = renderer();
         let artifacts = renderer.render(&config(pairs)).unwrap();
         renderer.check(&artifacts).expect("check must pass");
         artifacts.managed[0].files.clone()
+    }
+
+    /// The persistent directory: `.link` only.
+    fn rendered_links(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        let (renderer, _) = renderer();
+        let artifacts = renderer.render(&config(pairs)).unwrap();
+        renderer.check(&artifacts).expect("check must pass");
+        assert_eq!(artifacts.managed[1].dir, Paths::under("/test").link_dir());
+        artifacts.managed[1].files.clone()
     }
 
     #[test]
@@ -598,18 +649,18 @@ mod tests {
         assert!(network.contains("MTUBytes=9000"), "{network}");
         assert!(network.contains("Description=the uplink"), "{network}");
         assert!(network.contains("Address=192.168.1.1/24"), "{network}");
-        // Nothing for udev to do, so no .link file.
+        // The .link files are not in this directory at all.
         assert!(!files.contains_key("10-ns-eth0.link"), "{files:#?}");
     }
 
     #[test]
     fn mac_speed_and_duplex_go_in_a_link_file() {
-        let files = rendered(&[
+        let links = rendered_links(&[
             ("interfaces ethernet eth0 mac", "02:00:5e:10:00:01"),
             ("interfaces ethernet eth0 speed", "1000"),
             ("interfaces ethernet eth0 duplex", "full"),
         ]);
-        let link = &files["10-ns-eth0.link"];
+        let link = &links["10-ns-eth0.link"];
         assert!(link.contains("OriginalName=eth0"), "{link}");
         assert!(link.contains("MACAddress=02:00:5e:10:00:01"), "{link}");
         assert!(link.contains("BitsPerSecond=1000M"), "{link}");
@@ -618,14 +669,68 @@ mod tests {
 
     #[test]
     fn auto_speed_and_duplex_say_nothing_at_all() {
-        let files = rendered(&[
+        let links = rendered_links(&[
             ("interfaces ethernet eth0 speed", "auto"),
             ("interfaces ethernet eth0 duplex", "auto"),
         ]);
         assert!(
-            !files.contains_key("10-ns-eth0.link"),
-            "auto produced a .link file: {files:#?}"
+            !links.contains_key("10-ns-eth0.link"),
+            "auto produced a .link file: {links:#?}"
         );
+    }
+
+    /// The rename. `hw-id` pins the name to the port's burned-in address, so
+    /// the kernel's own guess (`ens33`) never reaches the operator.
+    #[test]
+    fn hw_id_pins_the_name_to_the_port() {
+        let links = rendered_links(&[("interfaces ethernet eth0 hw-id", "00:0c:29:1a:2b:3c")]);
+        let link = &links["10-ns-eth0.link"];
+        assert!(
+            link.contains("PermanentMACAddress=00:0c:29:1a:2b:3c"),
+            "{link}"
+        );
+        assert!(link.contains("Name=eth0"), "{link}");
+        // Matching the kernel's name would defeat the point: that name is the
+        // thing being replaced.
+        assert!(!link.contains("OriginalName"), "{link}");
+    }
+
+    /// One file per port, because udev applies the first match and no other.
+    /// Name and properties therefore have to arrive together.
+    #[test]
+    fn a_pinned_port_carries_its_properties_in_the_same_file() {
+        let links = rendered_links(&[
+            ("interfaces ethernet eth0 hw-id", "00:0c:29:1a:2b:3c"),
+            ("interfaces ethernet eth0 mac", "02:00:5e:10:00:01"),
+            ("interfaces ethernet eth0 speed", "10000"),
+            ("interfaces ethernet eth0 duplex", "full"),
+        ]);
+        assert_eq!(links.len(), 1, "{links:#?}");
+        let link = &links["10-ns-eth0.link"];
+        assert!(link.contains("PermanentMACAddress=00:0c:29:1a:2b:3c"), "{link}");
+        assert!(link.contains("Name=eth0"), "{link}");
+        // The administrative MAC is a different thing from the one matched on.
+        assert!(link.contains("MACAddress=02:00:5e:10:00:01"), "{link}");
+        assert!(link.contains("BitsPerSecond=10000M"), "{link}");
+        assert!(link.contains("Duplex=full"), "{link}");
+    }
+
+    /// Renaming survives a reboot only if the file does, so it must be the
+    /// persistent directory and never the tmpfs one.
+    #[test]
+    fn link_files_are_written_where_udev_reads_them_before_configd_runs() {
+        let (renderer, _) = renderer();
+        let artifacts = renderer
+            .render(&config(&[("interfaces ethernet eth0 hw-id", "00:0c:29:1a:2b:3c")]))
+            .unwrap();
+        let paths = Paths::under("/test");
+        let links = artifacts
+            .managed
+            .iter()
+            .find(|m| m.files.keys().any(|f| f.ends_with(".link")))
+            .expect("a directory holding the .link files");
+        assert_eq!(links.dir, paths.link_dir());
+        assert_ne!(links.dir, paths.networkd_dir());
     }
 
     #[test]

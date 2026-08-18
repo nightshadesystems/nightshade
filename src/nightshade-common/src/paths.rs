@@ -162,6 +162,22 @@ impl Paths {
         self.at("run/systemd/network")
     }
 
+    /// Where the `.link` files that name physical ports live.
+    ///
+    /// `/etc`, not `/run`, and the difference is the whole reason renaming
+    /// works. A `.link` is read by udev when the device appears, which is long
+    /// before configd is running -- so a file configd writes into the tmpfs at
+    /// commit time is a file that has already been missed. Persisting them
+    /// means the names are in effect from the first moment of the boot, and a
+    /// configd that fails to start leaves the ports named as they were rather
+    /// than reverting the box to kernel names.
+    ///
+    /// Only files marked with [`MANAGED_MARKER`](crate::MANAGED_MARKER) here
+    /// are ours; the directory is shared with whatever else ships `.link`s.
+    pub fn link_dir(&self) -> PathBuf {
+        self.at("etc/systemd/network")
+    }
+
     // -- the kernel ---------------------------------------------------------
 
     /// What the kernel says it has. Read-only, and read by configd rather than
@@ -186,6 +202,7 @@ mod tests {
             Path::new("/var/lib/nightshade/archive")
         );
         assert_eq!(p.networkd_dir(), Path::new("/run/systemd/network"));
+        assert_eq!(p.link_dir(), Path::new("/etc/systemd/network"));
         assert_eq!(p.resolv_conf(), Path::new("/etc/resolv.conf"));
     }
 

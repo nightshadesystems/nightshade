@@ -27,3 +27,32 @@ nodes:
         type: time-zone
         default: UTC
         help: "Time zone, as an Area/Location name"
+
+      login:
+        kind: container
+        help: "Accounts that can log in to this system"
+        children:
+
+          user:
+            kind: tag
+            help: "A local user account"
+            tag:
+              type: user-name
+              help: "Account name"
+            children:
+
+              full-name:
+                kind: leaf
+                type: string
+                help: "Name shown in the account's GECOS field"
+
+              authentication:
+                kind: container
+                help: "How the account proves who it is"
+                children:
+
+                  encrypted-password:
+                    kind: leaf
+                    type: encrypted-password
+                    secret: true
+                    help: "crypt(3) hash of the password, never the password"
