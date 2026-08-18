@@ -52,18 +52,30 @@ NoNewPrivileges=yes
 # The whole filesystem read-only except what is listed. The list is the honest
 # statement of what this daemon writes:
 ProtectSystem=strict
-#   the saved configuration, written by `save`
-ReadWritePaths=/etc/nightshade
+#   config.boot written by `save`; resolv.conf and hosts written by the system
+#   renderer (no systemd-resolved in this phase, so both are owned outright).
+#
+#   The whole directory, not the three paths. Every file is replaced by
+#   writing `<name>.ns-new` beside it and renaming over the top, so a torn
+#   file is never visible to whatever reads it mid-commit -- and a per-file
+#   grant cannot carry that: ReadWritePaths on a single file is a bind mount,
+#   which leaves the directory read-only for the temporary (EROFS) and makes
+#   the file itself a mountpoint nothing can rename onto (EBUSY). This is the
+#   same conclusion systemd-hostnamed ships with, for the same reason.
+ReadWritePaths=/etc
+#   what /etc write access must never mean, remounted read-only on top: the
+#   login stack, who exists, who elevates, sshd's identity, and systemd's own
+#   units -- a daemon that can rewrite its own unit can shed this sandbox at
+#   the next restart. Not an allowlist, a re-mask; the allowlist is above.
+ReadOnlyPaths=/etc/passwd /etc/shadow /etc/group /etc/gshadow
+ReadOnlyPaths=/etc/pam.d /etc/sudoers /etc/sudoers.d /etc/ssh
+ReadOnlyPaths=/etc/systemd
 #   the archive and the last-applied artifacts a failed commit restores from
 ReadWritePaths=/var/lib/nightshade
 #   sessions, running state, the pending-confirm marker, the socket
 ReadWritePaths=/run/nightshade
 #   rendered .network/.netdev/.link files -- only ones marked `-ns-`
 ReadWritePaths=/run/systemd/network
-#   owned outright by the system renderer; this phase runs no systemd-resolved
-ReadWritePaths=/etc/resolv.conf
-#   one line of it, keeping the configured host name resolvable
-ReadWritePaths=/etc/hosts
 
 ProtectHome=yes
 PrivateTmp=yes

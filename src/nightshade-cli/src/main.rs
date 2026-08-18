@@ -240,8 +240,7 @@ fn interactive(cli: &mut Cli) -> Outcome {
         editor = editor.with_history(history);
     }
 
-    println!("Nightshade {}", nightshade_common::VERSION);
-    println!("`?` lists what can go here, <Tab> completes it, `exit` leaves.\n");
+    println!("Nightshade {}\n", nightshade_common::VERSION);
     warn_if_boot_failed(&Paths::system());
 
     loop {
