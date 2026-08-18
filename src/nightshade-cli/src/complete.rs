@@ -30,7 +30,10 @@ use reedline::{Completer, CompletionResult, Span, Suggestion};
 
 /// Commands that take a configuration path, and so complete against the
 /// schema. Everything else completes against its own word list.
-const PATH_COMMANDS: &[&str] = &["set", "delete", "show", "edit"];
+///
+/// `sh` is here because it is an alias for `show`, and a shorthand that stops
+/// completing is a shorthand nobody uses twice.
+const PATH_COMMANDS: &[&str] = &["set", "delete", "show", "sh", "edit"]; // not-a-shell: `sh` is the alias for the `show` command, never a program
 
 /// What the completer needs to know, refreshed by the REPL before each prompt.
 #[derive(Default)]
@@ -150,6 +153,19 @@ fn commands(context: &Context, being_typed: &str) -> Vec<NodeInfo> {
             secret: false,
         })
         .collect()
+}
+
+/// What a line ending in `?` is asking about, or `None` if it does not.
+///
+/// Only a trailing `?` is a question, so a `?` inside a value stays typeable.
+///
+/// The returned prefix keeps its trailing whitespace, and that is the whole
+/// point of this function: whitespace is what [`words`] reads to decide
+/// whether the last word is finished. `set ?` asks what can follow `set`;
+/// `set?` asks which commands start with `set`. Trim the space and every
+/// question becomes the second kind, answering one word too early.
+pub fn question(line: &str) -> Option<&str> {
+    line.strip_suffix('?')
 }
 
 /// Split a line into words, and say whether the last one is unfinished.
@@ -327,6 +343,30 @@ mod tests {
     fn nonsense_paths_offer_nothing_rather_than_failing() {
         assert!(names("set nonsense ").is_empty());
         assert!(names("set interfaces ethernet eth0 mtu 9000 ").is_empty());
+    }
+
+    /// A `?` asks about the position it is in, and the space in front of it
+    /// is what says which position that is.
+    #[test]
+    fn a_trailing_question_mark_keeps_the_space_before_it() {
+        assert_eq!(question("set ?"), Some("set "));
+        assert_eq!(question("set?"), Some("set"));
+        assert_eq!(question("?"), Some(""));
+        assert_eq!(question("set interfaces ethernet eth0 mtu ?"),
+                   Some("set interfaces ethernet eth0 mtu "));
+
+        // Not a question at all.
+        assert_eq!(question("set system host-name fw-01"), None);
+        assert_eq!(question("set system host-name a?b"), None);
+    }
+
+    /// The regression: with the space eaten, `set ?` answers the question
+    /// `set?` asks, and offers the command back instead of what follows it.
+    #[test]
+    fn the_space_before_a_question_mark_decides_the_answer() {
+        let after = names(question("set ?").unwrap());
+        assert_eq!(after, ["interfaces", "system"]);
+        assert_eq!(names(question("set?").unwrap()), ["set"]);
     }
 
     #[test]

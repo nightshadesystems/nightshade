@@ -257,6 +257,50 @@ fn question_mark_lists_what_can_go_here() {
     assert_eq!(run(&mut cli, "set interfaces ethernet eth0 mtu ?"), Outcome::Ok);
 }
 
+/// `?` answers the same question `<Tab>` does, at the same position.
+///
+/// The space in front of the `?` is what says the word before it is finished.
+/// Lose it and every `?` answers one word too early: `set ?` offers `set`
+/// instead of what can follow it.
+#[test]
+fn question_mark_asks_about_the_position_after_the_last_word() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+    run(&mut cli, "configure");
+    cli.refresh();
+
+    // Exactly what a typed line does: split off the `?`, then answer it.
+    let asked = |cli: &Cli, line: &str| -> String {
+        cli.help(complete::question(line).expect("a question"))
+    };
+
+    // `set ?` is a question about what comes after `set`.
+    let after_set = asked(&cli, "set ?");
+    assert!(after_set.contains("interfaces"), "{after_set}");
+    assert!(after_set.contains("system"), "{after_set}");
+    assert!(!after_set.contains("\n  set"), "{after_set}");
+
+    let after_system = asked(&cli, "set system ?");
+    for leaf in ["host-name", "name-server", "time-zone"] {
+        assert!(after_system.contains(leaf), "{after_system}");
+    }
+
+    // Without the space it is a question about the word itself, still.
+    let narrowing = asked(&cli, "set sys?");
+    assert!(narrowing.contains("system"), "{narrowing}");
+    assert!(!narrowing.contains("host-name"), "{narrowing}");
+
+    // A bare `?` is the command list.
+    let commands = asked(&cli, "?");
+    assert!(commands.contains("commit"), "{commands}");
+    assert!(commands.contains("rollback"), "{commands}");
+
+    // A value position describes the value.
+    let mtu = asked(&cli, "set interfaces ethernet eth0 mtu ?");
+    assert!(mtu.contains("<68-9216>"), "{mtu}");
+    assert!(mtu.contains("1500"), "{mtu}");
+}
+
 // ---------------------------------------------------------------------------
 // the configuration commands
 // ---------------------------------------------------------------------------
@@ -291,6 +335,50 @@ fn a_whole_edit_runs_from_the_command_line() {
     assert_eq!(run(&mut cli, "show system commit-log"), Outcome::Ok);
     assert_eq!(run(&mut cli, "show interfaces"), Outcome::Ok);
     assert_eq!(run(&mut cli, "show version"), Outcome::Ok);
+}
+
+/// The short spellings people actually type reach the same commands.
+#[test]
+fn the_aliases_reach_the_command_they_are_short_for() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+
+    // Every spelling of `configure` opens a session that `exit` closes.
+    for spelling in ["configure", "config", "conf"] {
+        assert_eq!(run(&mut cli, spelling), Outcome::Ok, "{spelling}");
+        cli.refresh();
+        assert_eq!(cli.mode, Mode::Configuration, "{spelling}");
+        assert_eq!(run(&mut cli, "exit"), Outcome::Ok, "{spelling}");
+        cli.refresh();
+        assert_eq!(cli.mode, Mode::Operational, "{spelling}");
+    }
+
+    // Every spelling of the saved configuration, and `sh` for `show`.
+    for line in [
+        "show configuration",
+        "show config",
+        "show conf",
+        "sh configuration",
+        "sh config",
+        "sh conf",
+        "sh version",
+    ] {
+        assert_eq!(run(&mut cli, line), Outcome::Ok, "{line}");
+    }
+
+    // `sh` is show, in configuration mode too, where it takes a path.
+    run(&mut cli, "config");
+    cli.refresh();
+    assert_eq!(run(&mut cli, "sh interfaces"), Outcome::Ok);
+    run(&mut cli, "exit");
+
+    // Named aliases, not prefix matching: a word that is not one of them is
+    // still an error rather than a guess.
+    cli.refresh();
+    assert_eq!(run(&mut cli, "configu"), Outcome::CommandError);
+    assert_eq!(run(&mut cli, "s version"), Outcome::CommandError);
+    cli.refresh();
+    assert_eq!(cli.mode, Mode::Operational);
 }
 
 #[test]

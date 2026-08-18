@@ -235,7 +235,7 @@ fn interactive(cli: &mut Cli) -> Outcome {
 
     loop {
         cli.refresh();
-        let prompt = NsPrompt { text: cli.prompt() };
+        let prompt = NsPrompt::new(cli.prompt(), cli.colour());
 
         match editor.read_line(&prompt) {
             Ok(Signal::Success(line)) => {

@@ -33,7 +33,7 @@ use nightshade_schema::config::ConfigTree;
 use nightshade_schema::model::Schema;
 use nightshade_schema::path::Path;
 use nightshade_schema::value::{ValueType, ValueSpec};
-use reedline::{Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus};
+use reedline::{Color, Prompt, PromptEditMode, PromptHistorySearch, PromptHistorySearchStatus};
 
 use crate::client::{Client, ClientError};
 use crate::complete::{self, Context};
@@ -78,6 +78,12 @@ pub enum Mode {
     Configuration,
 }
 
+/// The commands `?` lists and `<Tab>` completes.
+///
+/// One spelling each. The aliases -- `conf`, `config`, `sh` -- are accepted
+/// but deliberately not listed: they are shorthands for a word already here,
+/// and listing both spellings makes `<Tab>` ambiguous where it currently
+/// fills the rest of the word in.
 const OPERATIONAL_COMMANDS: &[&str] = &[
     "configure", "exit", "help", "logout", "ping", "quit", "shell", "show", "traceroute",
 ];
@@ -113,6 +119,10 @@ impl Cli {
             context: Arc::new(Mutex::new(Context::default())),
             colour,
         }
+    }
+
+    pub fn colour(&self) -> bool {
+        self.colour
     }
 
     /// `user@hostname>` or `user@hostname#`, with the path `edit` set.
@@ -172,10 +182,12 @@ impl Cli {
             return Outcome::Ok;
         }
 
-        // `?` asks what can go here. Handled before anything else, and only
-        // as a trailing word, so a `?` inside a value stays typeable.
-        if let Some(prefix) = line.strip_suffix('?') {
-            print!("{}", self.help(prefix.trim_end()));
+        // `?` asks what can go here, and is handled before anything else.
+        // The prefix arrives with its trailing space intact, which is what
+        // makes `set ?` a question about what follows `set`; see
+        // [`complete::question`].
+        if let Some(prefix) = complete::question(line) {
+            print!("{}", self.help(prefix));
             return Outcome::Ok;
         }
 
@@ -235,8 +247,14 @@ impl Cli {
 
     fn operational(&mut self, verb: &str, rest: &[String]) -> Result<(Output, Outcome), ClientError> {
         match verb {
-            "show" => self.op_show(rest),
-            "configure" => {
+            "show" | "sh" => self.op_show(rest), // not-a-shell: `sh` is short for `show`; `shell` is spelled out
+            // Shorthands for the same command, written out. Named aliases
+            // rather than prefix matching: `conf` means this and only this,
+            // and it goes on meaning it when a command starting with `conf` is
+            // added later. A CLI that resolves half a word by what else
+            // happens to exist is a CLI whose meaning changes under an
+            // operator who has already learnt it.
+            "configure" | "config" | "conf" => {
                 match self.client.call(Request::SessionOpen)? {
                     Response::Session { id } => {
                         self.session = Some(id);
@@ -274,7 +292,9 @@ impl Cli {
                 other => Ok(self.unexpected(other)),
             },
 
-            ["configuration"] => self.expect_config(Request::ShowSaved { path: Path::root() }),
+            ["configuration"] | ["config"] | ["conf"] => {
+                self.expect_config(Request::ShowSaved { path: Path::root() })
+            }
 
             ["system", "commit-log"] => match self.client.call(Request::CommitLog)? {
                 Response::Revisions { revisions } => Ok((Output::Revisions(revisions), Outcome::Ok)),
@@ -417,7 +437,7 @@ impl Cli {
                 self.expect_ok(request)
             }
 
-            "show" => {
+            "show" | "sh" => { // not-a-shell: `sh` is short for `show`; there is no shell from here at all
                 let at = self.with_prefix(rest);
                 let candidate = match self.client.call(Request::ShowCandidate {
                     session: session.clone(),
@@ -671,8 +691,10 @@ impl Cli {
         )
     }
 
-    /// What `?` prints.
-    fn help(&self, typed: &str) -> String {
+    /// What `?` prints, for everything typed in front of it.
+    ///
+    /// Whitespace at the end of `typed` is significant; see [`Cli::run`].
+    pub fn help(&self, typed: &str) -> String {
         let context = match self.context.lock() {
             Ok(context) => context,
             Err(_) => return String::new(),
@@ -753,12 +775,40 @@ fn page(text: &str, no_more: bool) {
     let _ = stdout.flush();
 }
 
+/// The violet the rest of Nightshade is drawn in.
+///
+/// The same ANSI slot the installer's `VIOLET` uses -- palette 13, `SGR 95` --
+/// and named rather than given as RGB for the same reason it is named there:
+/// the Linux virtual console this is read on is a 16-colour terminal that
+/// discards 24-bit escapes. Without it the prompt is reedline's default green,
+/// which is nothing else on the box.
+const VIOLET: Color = Color::LightMagenta;
+
 /// The reedline prompt.
 pub struct NsPrompt {
     pub text: String,
+    /// Off when nobody is going to see it; see [`crate::output::use_colour`].
+    pub colour: bool,
+}
+
+impl NsPrompt {
+    pub fn new(text: String, colour: bool) -> Self {
+        Self { text, colour }
+    }
 }
 
 impl Prompt for NsPrompt {
+    fn get_prompt_color(&self) -> Color {
+        if self.colour { VIOLET } else { Color::Default }
+    }
+
+    /// The whole prompt is in [`Self::render_prompt_left`], so this colours
+    /// nothing today. Set anyway, so that giving the indicator its own text
+    /// later cannot reintroduce the green a word at a time.
+    fn get_indicator_color(&self) -> Color {
+        self.get_prompt_color()
+    }
+
     fn render_prompt_left(&self) -> Cow<'_, str> {
         Cow::Borrowed(&self.text)
     }

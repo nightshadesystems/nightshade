@@ -38,9 +38,12 @@ fn crate_sources() -> Vec<(PathBuf, String)> {
         .collect()
 }
 
-/// Lines with the comment stripped, so the prose about shells does not trip
-/// the audit that is about shells.
-fn code_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
+/// Line number, the code with any comment stripped, and the whole line.
+///
+/// The needles are matched against the code, so prose about shells does not
+/// trip an audit that is about shells. The whole line comes back too, because
+/// a waiver is written in the comment the stripping removes.
+fn code_lines(text: &str) -> impl Iterator<Item = (usize, &str, &str)> {
     text.lines().enumerate().filter_map(|(i, line)| {
         let trimmed = line.trim_start();
         if trimmed.starts_with("//") {
@@ -50,12 +53,25 @@ fn code_lines(text: &str) -> impl Iterator<Item = (usize, &str)> {
             Some(at) => &line[..at],
             None => line,
         };
-        Some((i + 1, code))
+        Some((i + 1, code, line))
     })
 }
 
 /// The one file allowed to know what bash is.
 const SHELL_MODULE: &str = "shell.rs";
+
+/// What a line says about itself to be allowed a bare `"sh"`.
+///
+/// `sh` is the only reserved word here that is also an ordinary English
+/// abbreviation -- the CLI has `sh` as an alias for `show` -- so it is the only
+/// one that can be waived. `/bin/sh`, `"bash"` and `/bin/bash` name a program
+/// and nothing else, and no comment excuses them.
+///
+/// A waiver is not a way around the audit. It is a marker that survives grep,
+/// shows up in a diff, and has to be argued for in review; the audit's job is
+/// to make naming a shell a decision somebody made on purpose, not to make it
+/// impossible to write the two letters down.
+const WAIVER: &str = "not-a-shell:";
 
 #[test]
 fn only_one_file_names_a_shell() {
@@ -65,9 +81,12 @@ fn only_one_file_names_a_shell() {
 
     for (path, text) in crate_sources() {
         let name = path.file_name().unwrap().to_string_lossy().into_owned();
-        for (number, line) in code_lines(&text) {
+        for (number, code, whole) in code_lines(&text) {
             for needle in forbidden {
-                if !line.contains(needle) {
+                if !code.contains(needle) {
+                    continue;
+                }
+                if needle == "\"sh\"" && whole.contains(WAIVER) {
                     continue;
                 }
                 assert_eq!(
@@ -75,9 +94,29 @@ fn only_one_file_names_a_shell() {
                     "{}:{number} names a shell ({needle}); \
                      the only file allowed to is {SHELL_MODULE}\n  {}",
                     path.display(),
-                    line.trim()
+                    whole.trim()
                 );
             }
+        }
+    }
+}
+
+/// A waiver has to say something. An empty marker is a comment somebody added
+/// to make a test stop failing, which is the one use of it that is not allowed.
+#[test]
+fn every_waiver_gives_a_reason() {
+    for (path, text) in crate_sources() {
+        for (number, _, whole) in code_lines(&text) {
+            let Some(at) = whole.find(WAIVER) else {
+                continue;
+            };
+            let reason = whole[at + WAIVER.len()..].trim();
+            assert!(
+                reason.len() > 10,
+                "{}:{number} waives the shell audit without saying why\n  {}",
+                path.display(),
+                whole.trim()
+            );
         }
     }
 }
@@ -93,7 +132,7 @@ fn the_shell_is_never_given_a_command_to_run() {
     )
     .expect("the shell module");
 
-    for (number, line) in code_lines(&shell) {
+    for (number, line, _) in code_lines(&shell) {
         assert!(
             !line.contains("\"-c\""),
             "{SHELL_MODULE}:{number} passes -c to a shell\n  {}",
@@ -114,7 +153,7 @@ fn the_shell_is_never_given_a_command_to_run() {
 #[test]
 fn every_program_started_is_named_by_a_literal() {
     for (path, text) in crate_sources() {
-        for (number, line) in code_lines(&text) {
+        for (number, line, _) in code_lines(&text) {
             let Some(at) = line.find("Command::new(") else {
                 continue;
             };
@@ -160,7 +199,7 @@ fn the_only_indirect_program_comes_from_a_fixed_set() {
 #[test]
 fn nothing_reaches_a_process_through_a_string() {
     for (path, text) in crate_sources() {
-        for (number, line) in code_lines(&text) {
+        for (number, line, _) in code_lines(&text) {
             for needle in ["libc::system", "process::exit(", "exec(", "execvp"] {
                 assert!(
                     !line.contains(needle),
@@ -184,7 +223,10 @@ fn the_daemon_and_the_renderers_start_nothing_through_a_shell() {
     for crate_name in ["nightshade-configd", "nightshade-render"] {
         for path in sources(&workspace.join(crate_name).join("src")) {
             let text = std::fs::read_to_string(&path).expect("a source file");
-            for (number, line) in code_lines(&text) {
+            // No waiver here. configd runs as root and has no operator-facing
+            // vocabulary to collide with, so it has no reason to write any of
+            // these and no way to excuse doing it.
+            for (number, line, _) in code_lines(&text) {
                 for needle in ["/bin/sh", "\"sh\"", "\"bash\"", "libc::system"] {
                     assert!(
                         !line.contains(needle),
