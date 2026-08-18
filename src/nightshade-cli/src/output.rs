@@ -548,7 +548,7 @@ mod tests {
             running: tree,
         }
         .render(&style());
-        // The marker is the first character of a line. `host-name` has a
+        // The marker is the first character of a line. `hostname` has a
         // hyphen in it and is not a change.
         for line in text.lines() {
             assert!(

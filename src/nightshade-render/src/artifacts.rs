@@ -23,7 +23,14 @@ pub struct Managed {
 /// Something applied by running a tool rather than by writing a file.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
-    SetHostName(String),
+    /// The host name, and the domain it is in when one is configured.
+    ///
+    /// The domain rides along because `/etc/hosts` needs the fully qualified
+    /// name and `apply` only ever sees the artifacts, never the config.
+    SetHostName {
+        name: String,
+        domain: Option<String>,
+    },
     SetTimeZone(String),
     /// Ask networkd to re-read what was just written.
     ReloadNetworkd,
@@ -69,7 +76,10 @@ impl Action {
     /// A list, never a string. Nothing here is ever handed to a shell.
     pub fn argv(&self) -> Option<Vec<String>> {
         let argv = match self {
-            Action::SetHostName(name) => {
+            // The short name. The kernel host name is conventionally
+            // unqualified; the fully qualified one is assembled in
+            // `/etc/hosts`, which is where resolvers look for it.
+            Action::SetHostName { name, .. } => {
                 vec!["hostnamectl".into(), "set-hostname".into(), name.clone()]
             }
             Action::SetTimeZone(zone) => {

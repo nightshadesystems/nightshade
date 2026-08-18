@@ -195,7 +195,7 @@ fn set_accepts_what_the_schema_describes() {
 fn set_rejects_with_a_message_about_the_right_thing() {
     let schema = schema();
 
-    // Unknown path.
+    // Unknown path: the node is `host-name`, so `hostname` is not one.
     assert!(matches!(
         schema.validate_set(&p("system hostname"), Some("fw")),
         Err(SetError::UnknownPath { .. })
@@ -629,6 +629,10 @@ fn the_installers_fresh_config_parses_and_validates() {
 ",
         "    }
 ",
+        "    loopback lo {
+",
+        "    }
+",
         "}
 ",
         "system {
@@ -701,7 +705,7 @@ fn children_of_drives_completion_at_every_position() {
 
     let system = schema.children_of(&p("system"));
     let names: Vec<&str> = system.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["host-name", "login", "name-server", "time-zone"]);
+    assert_eq!(names, ["domain-name", "host-name", "login", "name-server", "time-zone"]);
     let name_server = system.iter().find(|c| c.name == "name-server").unwrap();
     assert!(name_server.multi);
     assert_eq!(name_server.value.as_deref(), Some("<ip-address>"));

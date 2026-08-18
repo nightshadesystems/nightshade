@@ -91,7 +91,7 @@ fn nothing_saved_applies_nothing() {
 #[test]
 fn a_config_that_will_not_parse_comes_up_on_defaults_and_says_why() {
     let harness = Harness::start();
-    save_boot(&harness, "system {\n    host-name saved-box\n");
+    save_boot(&harness, "system {\n    hostname saved-box\n");
 
     let harness = harness.reboot();
     let mut client = harness.connect();
@@ -126,7 +126,7 @@ fn a_config_the_schema_no_longer_describes_comes_up_on_defaults() {
     let harness = Harness::start();
     save_boot(
         &harness,
-        "system {\n    host-name saved-box\n    nameserver 1.1.1.1\n}\n",
+        "system {\n    hostname saved-box\n    nameserver 1.1.1.1\n}\n",
     );
 
     let harness = harness.reboot();
@@ -144,7 +144,7 @@ fn a_config_the_schema_no_longer_describes_comes_up_on_defaults() {
 #[test]
 fn fixing_the_config_clears_the_warning() {
     let harness = Harness::start();
-    save_boot(&harness, "system {\n    host-name saved-box\n");
+    save_boot(&harness, "system {\n    hostname saved-box\n");
     let harness = harness.reboot();
     assert!(harness.paths().boot_failure().exists());
 

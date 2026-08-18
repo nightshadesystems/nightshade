@@ -222,7 +222,7 @@ mod tests {
     #[test]
     fn a_file_that_does_not_parse_says_where() {
         let dir = tempfile::tempdir().unwrap();
-        let path = write(&dir, "system {\n    host-name fw\n");
+        let path = write(&dir, "system {\n    hostname fw\n");
         let reason = saved(schema(), &path).unwrap_err();
         assert!(reason.contains("does not parse"), "{reason}");
         assert!(reason.contains("line 1"), "{reason}");
@@ -235,7 +235,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = write(
             &dir,
-            "system {\n    host-name fw\n    nameserver 1.1.1.1\n    fax-number 555\n}\n",
+            "system {\n    hostname fw\n    nameserver 1.1.1.1\n    fax-number 555\n}\n",
         );
         let reason = saved(schema(), &path).unwrap_err();
         assert!(reason.contains("nameserver"), "{reason}");

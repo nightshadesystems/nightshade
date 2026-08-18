@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! system {
-//!     host-name nightshade
+//!     hostname nightshade
 //!     name-server 1.1.1.1
 //!     name-server 9.9.9.9
 //! }

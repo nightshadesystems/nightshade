@@ -268,7 +268,7 @@ mod tests {
         assert_eq!(names("set "), ["interfaces", "system"]);
         assert_eq!(
             names("set system "),
-            ["host-name", "login", "name-server", "time-zone"]
+            ["domain-name", "host-name", "login", "name-server", "time-zone"]
         );
     }
 

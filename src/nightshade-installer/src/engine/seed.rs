@@ -135,15 +135,23 @@ pub fn config_boot(config: &InstallConfig, named: &[(String, &Port)], hash: Opti
          * system boots with; edit it with `configure` rather than by hand. */\n",
     );
 
-    if !named.is_empty() {
-        out.push_str("interfaces {\n");
-        for (name, port) in named {
-            out.push_str(&format!("    ethernet {name} {{\n"));
-            out.push_str(&format!("        hw-id {}\n", port.mac));
-            out.push_str("    }\n");
-        }
-        out.push_str("}\n");
+    // Always an interfaces block, because `lo` is always there. Ethernet
+    // before loopback, which is the order the schema renders them in, so a
+    // `save` straight after boot does not reshuffle the file.
+    out.push_str("interfaces {\n");
+    for (name, port) in named {
+        out.push_str(&format!("    ethernet {name} {{\n"));
+        out.push_str(&format!("        hw-id {}\n", port.mac));
+        out.push_str("    }\n");
     }
+    // The loopback, listed rather than assumed. Every box has one and nothing
+    // needs to configure it, but a configuration that silently omits an
+    // interface the box has is not a picture an operator can trust as
+    // complete -- and `lo` is where a service binds when it is meant not to be
+    // reachable, which is worth being able to see and to set an address on.
+    out.push_str("    loopback lo {\n");
+    out.push_str("    }\n");
+    out.push_str("}\n");
 
     out.push_str("system {\n");
     out.push_str(&format!("    host-name {}\n", config.hostname));
@@ -387,6 +395,8 @@ mod tests {
         assert!(text.contains("ethernet eth0 {"), "{text}");
         assert!(text.contains("hw-id 00:0c:29:00:00:01"), "{text}");
         assert!(text.contains("ethernet eth1 {"), "{text}");
+        // The loopback is part of the picture even though nothing configures it.
+        assert!(text.contains("loopback lo {"), "{text}");
         assert!(text.contains("host-name fw-01"), "{text}");
         assert!(text.contains("user nightshade {"), "{text}");
         // Quoted, or the file does not parse: `$` is not a bare-word char.
@@ -435,6 +445,8 @@ mod tests {
     fn a_missing_hash_leaves_the_account_out_rather_than_writing_a_broken_one() {
         let config = install_config("nightshade");
         let text = config_boot(&config, &[], None);
+        // Still an interfaces block: a box with no ports still has `lo`.
+        assert!(text.contains("loopback lo {"), "{text}");
         assert!(!text.contains("login"), "{text}");
         assert!(!text.contains("encrypted-password"), "{text}");
         assert!(text.contains("host-name"), "{text}");

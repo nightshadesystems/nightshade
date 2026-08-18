@@ -39,7 +39,7 @@ const RESOLV_HEADER: &str = "\
 
 /// The line in `/etc/hosts` this renderer maintains, and nothing else in that
 /// file.
-const HOSTS_MARKER: &str = "# nightshade host-name";
+const HOSTS_MARKER: &str = "# nightshade hostname";
 
 pub struct SystemRenderer {
     paths: Paths,
@@ -85,7 +85,17 @@ impl Renderer for SystemRenderer {
             .values_at(&Path::from_segments(["system", "name-server"]))
             .map(|values| values.iter().cloned().collect())
             .unwrap_or_default();
+        let domain = Self::value(config, "system domain-name");
         let mut resolv = String::from(RESOLV_HEADER);
+        // `search` before the resolvers, which is the order resolv.conf(5)
+        // uses throughout. One `search`, never `domain`: the two directives
+        // are mutually exclusive and the last one read wins, so writing both
+        // would leave which applies depending on line order.
+        if let Some(domain) = domain {
+            resolv.push_str("search ");
+            resolv.push_str(domain);
+            resolv.push('\n');
+        }
         for server in &servers {
             resolv.push_str("nameserver ");
             resolv.push_str(server);
@@ -94,7 +104,10 @@ impl Renderer for SystemRenderer {
         files.insert(self.paths.resolv_conf(), resolv);
 
         if let Some(name) = host_name {
-            actions.push(Action::SetHostName(name.to_string()));
+            actions.push(Action::SetHostName {
+                name: name.to_string(),
+                domain: domain.map(str::to_string),
+            });
         }
         if let Some(zone) = Self::value(config, "system time-zone") {
             actions.push(Action::SetTimeZone(zone.to_string()));
@@ -115,7 +128,7 @@ impl Renderer for SystemRenderer {
         let mut seen = std::collections::BTreeSet::new();
         for action in &artifacts.actions {
             let key = match action {
-                Action::SetHostName(_) => "host-name",
+                Action::SetHostName { .. } => "host-name",
                 Action::SetTimeZone(_) => "time-zone",
                 _ => continue,
             };
@@ -135,8 +148,8 @@ impl Renderer for SystemRenderer {
         }
 
         for action in &artifacts.actions {
-            if let Action::SetHostName(name) = action {
-                self.update_hosts(name)?;
+            if let Action::SetHostName { name, domain } = action {
+                self.update_hosts(name, domain.as_deref())?;
             }
             if let Some(argv) = action.argv() {
                 self.host.run(&argv)?;
@@ -164,7 +177,7 @@ impl SystemRenderer {
     /// Without it, `sudo` and anything else that resolves the local host name
     /// waits for a DNS timeout on a box whose whole job may be to not have
     /// working DNS yet.
-    fn update_hosts(&self, name: &str) -> Result<(), ApplyError> {
+    fn update_hosts(&self, name: &str, domain: Option<&str>) -> Result<(), ApplyError> {
         let path = self.paths.hosts();
         let existing = self.host.read(&path)?.unwrap_or_default();
 
@@ -173,7 +186,15 @@ impl SystemRenderer {
             .filter(|line| !line.trim_end().ends_with(HOSTS_MARKER))
             .map(str::to_string)
             .collect();
-        lines.push(format!("127.0.1.1\t{name}\t{HOSTS_MARKER}"));
+        // Fully qualified name first, short name second. That order is what
+        // makes `hostname -f` answer correctly: the resolver takes the first
+        // name on a matching line as canonical and the rest as aliases, so
+        // reversing them gives a box that cannot state its own FQDN.
+        let names = match domain {
+            Some(domain) => format!("{name}.{domain}\t{name}"),
+            None => name.to_string(),
+        };
+        lines.push(format!("127.0.1.1\t{names}\t{HOSTS_MARKER}"));
 
         let mut out = lines.join("\n");
         out.push('\n');
@@ -207,6 +228,59 @@ mod tests {
             host,
             paths,
         )
+    }
+
+    /// The domain suffix: a `search` line, and a fully qualified `/etc/hosts`
+    /// entry so the box can state its own name.
+    #[test]
+    fn a_domain_name_becomes_a_search_line_and_an_fqdn() {
+        let (renderer, host, paths) = renderer();
+        let artifacts = renderer
+            .render(&config(&[
+                ("system host-name", "fw-01"),
+                ("system domain-name", "example.com"),
+                ("system name-server", "1.1.1.1"),
+            ]))
+            .unwrap();
+        renderer.check(&artifacts).expect("check");
+
+        let resolv = &artifacts.files[&paths.resolv_conf()];
+        // `search` ahead of the resolvers, and exactly one of it.
+        assert!(resolv.contains("search example.com
+"), "{resolv}");
+        assert_eq!(resolv.matches("search ").count(), 1, "{resolv}");
+        assert!(
+            resolv.find("search ") < resolv.find("nameserver "),
+            "{resolv}"
+        );
+        // `domain` and `search` are mutually exclusive; only one is written.
+        assert!(!resolv.contains("
+domain "), "{resolv}");
+
+        renderer.apply(&artifacts).expect("apply");
+        let hosts = host.file(paths.hosts()).expect("an /etc/hosts");
+        // FQDN first, short name second, or `hostname -f` cannot answer.
+        assert!(
+            hosts.contains("127.0.1.1	fw-01.example.com	fw-01	"),
+            "{hosts}"
+        );
+    }
+
+    /// With no domain configured, nothing is invented.
+    #[test]
+    fn no_domain_name_leaves_the_short_name_alone() {
+        let (renderer, host, paths) = renderer();
+        let artifacts = renderer
+            .render(&config(&[("system host-name", "fw-01")]))
+            .unwrap();
+        assert!(
+            !artifacts.files[&paths.resolv_conf()].contains("search"),
+            "a search line appeared without a domain"
+        );
+        renderer.apply(&artifacts).expect("apply");
+        let hosts = host.file(paths.hosts()).expect("an /etc/hosts");
+        assert!(hosts.contains("127.0.1.1	fw-01	"), "{hosts}");
+        assert!(!hosts.contains("fw-01."), "{hosts}");
     }
 
     #[test]
@@ -272,13 +346,13 @@ mod tests {
         let hosts = host.file(paths.hosts()).unwrap();
         assert!(hosts.contains("127.0.0.1\tlocalhost\n"), "{hosts}");
         assert!(hosts.contains("10.0.0.5\tsomething-else\n"), "{hosts}");
-        assert!(hosts.contains("127.0.1.1\tfw-01\t# nightshade host-name\n"), "{hosts}");
+        assert!(hosts.contains("127.0.1.1\tfw-01\t# nightshade hostname\n"), "{hosts}");
 
         // Renaming replaces our line rather than adding a second.
         let artifacts = renderer.render(&config(&[("system host-name", "fw-02")])).unwrap();
         renderer.apply(&artifacts).unwrap();
         let hosts = host.file(paths.hosts()).unwrap();
-        assert_eq!(hosts.matches("# nightshade host-name").count(), 1, "{hosts}");
+        assert_eq!(hosts.matches("# nightshade hostname").count(), 1, "{hosts}");
         assert!(hosts.contains("fw-02"), "{hosts}");
         assert!(!hosts.contains("fw-01"), "{hosts}");
     }

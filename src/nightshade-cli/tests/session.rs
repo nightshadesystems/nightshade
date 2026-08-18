@@ -230,7 +230,7 @@ fn completion_works_at_every_position() {
     assert_eq!(offered(&cli, "set "), ["interfaces", "system"]);
     assert_eq!(
         offered(&cli, "set system "),
-        ["host-name", "login", "name-server", "time-zone"]
+        ["domain-name", "host-name", "login", "name-server", "time-zone"]
     );
 
     // An interface that is configured is offered by name.
@@ -281,14 +281,14 @@ fn question_mark_asks_about_the_position_after_the_last_word() {
     assert!(!after_set.contains("\n  set"), "{after_set}");
 
     let after_system = asked(&cli, "set system ?");
-    for leaf in ["host-name", "name-server", "time-zone"] {
+    for leaf in ["domain-name", "host-name", "name-server", "time-zone"] {
         assert!(after_system.contains(leaf), "{after_system}");
     }
 
     // Without the space it is a question about the word itself, still.
     let narrowing = asked(&cli, "set sys?");
     assert!(narrowing.contains("system"), "{narrowing}");
-    assert!(!narrowing.contains("host-name"), "{narrowing}");
+    assert!(!narrowing.contains("hostname"), "{narrowing}");
 
     // A bare `?` is the command list.
     let commands = asked(&cli, "?");
@@ -392,6 +392,9 @@ fn a_bad_value_exits_two_and_a_bad_command_exits_one() {
         run(&mut cli, "set interfaces ethernet eth0 mtu 100000"),
         Outcome::ConfigError
     );
+    // `hostname` is not the node -- `host-name` is -- so this is a path the
+    // schema does not have, which is a configuration error and not a typo in
+    // the command itself.
     assert_eq!(run(&mut cli, "set system hostname fw"), Outcome::ConfigError);
 
     // A command problem.
@@ -494,7 +497,7 @@ fn pipe_modifiers_post_process_and_never_spawn() {
     run(&mut cli, "exit");
 
     for line in [
-        "show configuration | match host-name",
+        "show configuration | match hostname",
         "show configuration | count",
         "show configuration | no-more",
         "show configuration | display json",
@@ -507,7 +510,7 @@ fn pipe_modifiers_post_process_and_never_spawn() {
 
     // A modifier that does not exist is a command error.
     assert_eq!(
-        run(&mut cli, "show configuration | grep host-name"),
+        run(&mut cli, "show configuration | grep hostname"),
         Outcome::CommandError
     );
 }

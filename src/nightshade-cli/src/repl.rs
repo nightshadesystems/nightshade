@@ -17,7 +17,7 @@
 //! There is no `!`, no backtick, no `$(...)`, and `|` is a set of functions in
 //! [`crate::pipe`] rather than a pipeline. `ping` and `traceroute` exec their
 //! binaries with an argv, and their argument is checked against the schema's
-//! own host-name and address rules first -- so a host that starts with `-`, or
+//! own hostname and address rules first -- so a host that starts with `-`, or
 //! that is really a command substitution somebody hoped would be expanded,
 //! never reaches them.
 //!

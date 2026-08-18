@@ -14,6 +14,15 @@ systemd
 systemd-sysv
 udev
 kmod
+# The system bus. Not optional: `hostnamectl` and `timedatectl` are D-Bus
+# clients, and configd applies `system hostname` and `system time-zone`
+# through them precisely so the privileged work happens inside systemd rather
+# than inside a daemon holding CAP_SYS_ADMIN. Without dbus both fail with
+# "Failed to connect to system scope bus", every commit touching either is
+# rolled back, and a box whose config.boot sets a host name comes up on
+# defaults. nightshade-configd.service has always declared After=dbus.service
+# and kept AF_UNIX open for it; this is the package that makes that true.
+dbus
 
 # --- ZFS ------------------------------------------------------------------
 # zfs-dkms and linux-headers-amd64 are needed only to compile the module inside

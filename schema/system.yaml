@@ -17,6 +17,11 @@ nodes:
         default: nightshade
         help: "System host name"
 
+      domain-name:
+        kind: leaf
+        type: hostname
+        help: "DNS domain this system belongs to, e.g. example.com"
+
       name-server:
         kind: multi-leaf
         type: ip-address

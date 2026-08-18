@@ -269,7 +269,7 @@ mod tests {
                 id: SessionId::parse("0123456789abcdef").unwrap(),
             },
             Response::Config { tree },
-            Response::invalid("`system hostname` is not a configuration path"),
+            Response::invalid("`system host-name` is not a configuration path"),
         ] {
             let frame = frame::encode(&response).unwrap();
             let back: Response = frame::decode(&frame[frame::HEADER..]).unwrap();

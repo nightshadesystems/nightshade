@@ -368,7 +368,7 @@ fn a_hand_edited_file_with_a_mistake_in_it_is_refused_and_changes_nothing() {
     let path = harness.paths().config_boot();
     std::fs::write(
         &path,
-        "system {\n    host-name fw-02\n    nameserver 1.1.1.1\n}\n",
+        "system {\n    hostname fw-02\n    nameserver 1.1.1.1\n}\n",
     )
     .unwrap();
 
@@ -398,7 +398,7 @@ fn a_file_that_does_not_parse_is_reported_with_a_position() {
     let (mut client, session) = harness.session();
 
     std::fs::create_dir_all(harness.paths().etc_dir()).unwrap();
-    std::fs::write(harness.paths().config_boot(), "system {\n    host-name fw\n").unwrap();
+    std::fs::write(harness.paths().config_boot(), "system {\n    hostname fw\n").unwrap();
 
     let message = expect_failure(client.call(Request::Load {
         session,

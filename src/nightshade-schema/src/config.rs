@@ -215,8 +215,8 @@ impl ConfigTree {
     /// too, it would have to guess a body for it, and every caller below would
     /// then be unable to tell a node it just created from one the operator
     /// wrote. That is not hypothetical: an empty container written as
-    /// `host-name { }` and a placeholder created on the way to
-    /// `host-name` are the same value, so `add` would happily convert the
+    /// `hostname { }` and a placeholder created on the way to
+    /// `hostname` are the same value, so `add` would happily convert the
     /// operator's container into a leaf instead of reporting the
     /// contradiction. The caller creates the last node, with the body it
     /// means.

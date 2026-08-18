@@ -125,6 +125,7 @@ fn unknown_paths_and_bad_interface_names_are_refused() {
     let harness = Harness::start();
     let (mut client, session) = harness.session();
 
+    // `host-name` is the node; `hostname` is not a path the schema has.
     let message = expect_failure(client.call(set(&session, "system hostname", "fw")));
     assert!(message.contains("not a configuration path"), "{message}");
 
@@ -342,7 +343,7 @@ fn show_saved_reads_config_boot_from_disk() {
 
     // A file edited into something that does not parse is diagnosed with the
     // parser's line and column, not swallowed.
-    std::fs::write(harness.paths().config_boot(), "system {\n    host-name\n").unwrap();
+    std::fs::write(harness.paths().config_boot(), "system {\n    hostname\n").unwrap();
     let message = expect_failure(client.call(Request::ShowSaved { path: Path::root() }));
     assert!(message.contains("line 1"), "{message}");
 }
