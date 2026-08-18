@@ -8,6 +8,7 @@
 pub mod boot;
 pub mod partition;
 pub mod rootfs;
+pub mod seed;
 pub mod target;
 pub mod zfs;
 
@@ -219,6 +220,12 @@ fn install(
 
     step.begin("Creating the nightshade account");
     target::create_account(config)?;
+
+    // After the account exists, so the hash it writes into config.boot is the
+    // one actually in the target's /etc/shadow rather than one this process
+    // hoped chpasswd would produce.
+    step.begin("Writing the initial configuration");
+    seed::write_configuration(config, Path::new(config::TARGET))?;
 
     // Strict order: the cachefile has to exist before the initramfs is built,
     // because zfs-initramfs copies it into the image. That cached pool list is

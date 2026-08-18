@@ -600,6 +600,90 @@ fn a_valid_config_survives_a_save_and_a_load() {
     assert_eq!(curly::render(&curly::parse(&text).unwrap(), &schema), text);
 }
 
+/// Exactly what the installer writes into a fresh box, parsed by the schema
+/// that will have to load it at boot.
+///
+/// The installer has no dependencies and so formats this text by hand; this is
+/// the test that says the hand-written shape is one the parser accepts,
+/// validates and round-trips. Getting it wrong ships an appliance whose very
+/// first boot falls back to defaults.
+#[test]
+fn the_installers_fresh_config_parses_and_validates() {
+    let schema = schema();
+    let text = concat!(
+        "/* Written by the Nightshade installer. This is the configuration the
+",
+        " * system boots with; edit it with `configure` rather than by hand. */
+",
+        "interfaces {
+",
+        "    ethernet eth0 {
+",
+        "        hw-id 00:0c:29:1a:2b:3c
+",
+        "    }
+",
+        "    ethernet eth1 {
+",
+        "        hw-id 00:0c:29:1a:2b:4d
+",
+        "    }
+",
+        "}
+",
+        "system {
+",
+        "    host-name fw-01
+",
+        "    login {
+",
+        "        user nightshade {
+",
+        "            authentication {
+",
+        "                encrypted-password \"$6$rounds=656000$salt$checksum0123456789\"
+",
+        "            }
+",
+        "            full-name \"Nightshade administrator\"
+",
+        "        }
+",
+        "    }
+",
+        "}
+",
+    );
+
+    let tree = curly::parse(text).expect("the installer's config.boot must parse");
+    let violations = schema.validate_tree(&tree);
+    assert!(
+        violations.is_empty(),
+        "the installer's config.boot must validate: {violations:?}"
+    );
+
+    // The values survived the trip intact.
+    assert_eq!(
+        tree.get(&p("system host-name")).and_then(|n| n.value()),
+        Some("fw-01")
+    );
+    assert_eq!(
+        tree.get(&p("interfaces ethernet eth0 hw-id"))
+            .and_then(|n| n.value()),
+        Some("00:0c:29:1a:2b:3c")
+    );
+    assert_eq!(
+        tree.get(&p("system login user nightshade authentication encrypted-password"))
+            .and_then(|n| n.value()),
+        Some("$6$rounds=656000$salt$checksum0123456789")
+    );
+
+    // And re-rendering it is stable, so a `save` right after boot does not
+    // rewrite the file into something different.
+    let rendered = curly::render(&tree, &schema);
+    assert_eq!(curly::render(&curly::parse(&rendered).unwrap(), &schema), rendered);
+}
+
 // ---------------------------------------------------------------------------
 // completion metadata
 // ---------------------------------------------------------------------------

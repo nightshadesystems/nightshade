@@ -715,6 +715,46 @@ mod tests {
         assert!(link.contains("Duplex=full"), "{link}");
     }
 
+    /// The exact bytes of a pinned port's `.link`.
+    ///
+    /// Pinned deliberately, and duplicated in the installer's own tests: the
+    /// installer writes these files for the first boot (before configd has
+    /// ever run) and has no dependencies, so it formats them by hand. If the
+    /// two ever drift, the first commit silently rewrites every `.link` on the
+    /// box -- which works, but means the installed system and the committed
+    /// system disagreed and nobody was told. This test is the tripwire.
+    #[test]
+    fn a_pinned_link_file_is_exactly_this() {
+        let links = rendered_links(&[("interfaces ethernet eth0 hw-id", "00:0c:29:1a:2b:3c")]);
+        assert_eq!(
+            links["10-ns-eth0.link"],
+            concat!(
+                "# Managed by Nightshade. Do not edit.
+",
+                "#
+",
+                "# This file is generated from /etc/nightshade/config.boot and is rewritten on
+",
+                "# every commit. Changes made here are lost, and are not part of the config the
+",
+                "# next boot will apply.
+",
+                "
+",
+                "[Match]
+",
+                "PermanentMACAddress=00:0c:29:1a:2b:3c
+",
+                "
+",
+                "[Link]
+",
+                "Name=eth0
+",
+            )
+        );
+    }
+
     /// Renaming survives a reboot only if the file does, so it must be the
     /// persistent directory and never the tmpfs one.
     #[test]

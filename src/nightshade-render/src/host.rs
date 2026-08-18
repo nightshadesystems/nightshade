@@ -89,6 +89,19 @@ pub trait Host: Send + Sync {
 
     /// Run a program. Never a shell: the argv is passed through as given.
     fn run(&self, argv: &[String]) -> Result<(), HostError>;
+
+    /// Run a program, feeding it something on stdin that must not be seen.
+    ///
+    /// The separate method exists for one reason: `/proc/<pid>/cmdline` is
+    /// world-readable, so an argument is visible to every process on the box
+    /// for as long as the program runs. A password hash handed to
+    /// `chpasswd -e` as an argument is a password hash published to anyone
+    /// with a shell. On stdin it is a pipe between two processes and nothing
+    /// else can see it.
+    ///
+    /// `secret` is never logged, never recorded in an [`Op`], and never
+    /// included in an error message.
+    fn run_with_secret(&self, argv: &[String], secret: &str) -> Result<(), HostError>;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,6 +194,58 @@ impl Host for RealHost {
             } else {
                 format!(": {}", reason.lines().next().unwrap_or(reason))
             },
+        })
+    }
+
+    fn run_with_secret(&self, argv: &[String], secret: &str) -> Result<(), HostError> {
+        use std::io::Write;
+        use std::process::Stdio;
+
+        let Some((program, arguments)) = argv.split_first() else {
+            return Err(HostError::Command {
+                command: String::new(),
+                status: "no program".into(),
+                detail: String::new(),
+            });
+        };
+
+        let mut child = std::process::Command::new(program)
+            .args(arguments)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| HostError::io(format!("running {program}"), e))?;
+
+        // Dropped at the end of this block, which closes the pipe and is what
+        // tells the child there is no more input coming.
+        {
+            let mut stdin = child.stdin.take().ok_or_else(|| HostError::Command {
+                command: program.clone(),
+                status: "no stdin".into(),
+                detail: String::new(),
+            })?;
+            stdin
+                .write_all(secret.as_bytes())
+                .map_err(|e| HostError::io(format!("writing to {program}"), e))?;
+        }
+
+        let output = child
+            .wait_with_output()
+            .map_err(|e| HostError::io(format!("waiting for {program}"), e))?;
+        if output.status.success() {
+            return Ok(());
+        }
+
+        // The argv is safe to report -- the secret was never in it -- but the
+        // child's stderr is not: `chpasswd` echoes the line it could not parse.
+        Err(HostError::Command {
+            command: argv.join(" "),
+            status: match output.status.code() {
+                Some(code) => format!("exit {code}"),
+                None => "killed by signal".into(),
+            },
+            detail: String::new(),
         })
     }
 }
@@ -368,6 +433,16 @@ impl Host for MockHost {
             });
         }
         Ok(())
+    }
+
+    /// Records the argv exactly as [`MockHost::run`] does, and deliberately
+    /// does not record the secret.
+    ///
+    /// A test asserting on recorded ops therefore cannot accidentally start
+    /// depending on a password hash being in them -- which is the property the
+    /// real host is trying to have.
+    fn run_with_secret(&self, argv: &[String], _secret: &str) -> Result<(), HostError> {
+        self.run(argv)
     }
 }
 

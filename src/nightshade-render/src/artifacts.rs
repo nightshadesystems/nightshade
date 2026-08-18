@@ -33,6 +33,34 @@ pub enum Action {
     /// already running, and `render` is a function of the config alone. `apply`
     /// works it out by comparing against [`Renderer::previous`].
     RecreateNetdev(String),
+
+    /// An account that should exist, with this shell, groups and GECOS.
+    ///
+    /// The password is deliberately not here. It is a separate action so that
+    /// the argv this turns into -- which is what gets logged, recorded and
+    /// compared in the golden tests -- can never contain a hash.
+    EnsureAccount {
+        name: String,
+        full_name: Option<String>,
+    },
+
+    /// Set an account's password from its crypt hash.
+    ///
+    /// The hash rides in the action rather than the argv: [`Action::argv`]
+    /// returns the `chpasswd -e` command with nothing sensitive in it, and the
+    /// apply path feeds the hash to it on stdin via
+    /// [`Host::run_with_secret`](crate::host::Host::run_with_secret).
+    ///
+    /// This is serialised into the last-applied state, which is why that
+    /// directory is 0700 root -- see `dist/systemd/nightshade.conf`.
+    SetPassword { name: String, hash: String },
+
+    /// Remove an account this system used to manage and no longer does.
+    ///
+    /// Never produced by `render`, for the same reason as `RecreateNetdev`:
+    /// which accounts are surplus depends on what the last apply created, not
+    /// on the config alone.
+    RemoveAccount(String),
 }
 
 impl Action {
@@ -51,6 +79,25 @@ impl Action {
             Action::RecreateNetdev(name) => {
                 vec!["networkctl".into(), "delete".into(), name.clone()]
             }
+            // usermod rather than useradd: whether the account already exists
+            // is not knowable at render time, so the apply path picks. What is
+            // pinned here is the shape both share.
+            Action::EnsureAccount { name, full_name } => {
+                let mut argv = vec!["usermod".to_string()];
+                if let Some(full_name) = full_name {
+                    argv.push("--comment".into());
+                    argv.push(full_name.clone());
+                }
+                argv.push(name.clone());
+                argv
+            }
+            // `-e` means "what follows is already hashed". Without it chpasswd
+            // would hash the hash.
+            Action::SetPassword { .. } => vec!["chpasswd".into(), "-e".into()],
+            // No `--remove`: the home directory is not ours to delete. An
+            // operator who removed an account by mistake can put it back;
+            // one whose files went with it cannot.
+            Action::RemoveAccount(name) => vec!["userdel".into(), name.clone()],
         };
         Some(argv)
     }

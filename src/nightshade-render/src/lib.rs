@@ -58,6 +58,7 @@
 pub mod artifacts;
 pub mod host;
 pub mod ini;
+pub mod login;
 pub mod networkd;
 pub mod system;
 
@@ -67,6 +68,7 @@ use nightshade_common::paths::Paths;
 
 pub use artifacts::{Action, ApplyError, Artifacts, Managed, RenderError, Renderer};
 pub use host::{Host, HostError, MockHost, Op, RealHost};
+pub use login::LoginRenderer;
 pub use networkd::NetworkdRenderer;
 pub use system::SystemRenderer;
 
@@ -80,6 +82,7 @@ pub fn all(paths: Paths, host: Arc<dyn Host>) -> Vec<Box<dyn Renderer>> {
     let schema = nightshade_schema::model::Schema::compiled();
     let mut renderers: Vec<Box<dyn Renderer>> = vec![
         Box::new(SystemRenderer::new(paths.clone(), Arc::clone(&host))),
+        Box::new(LoginRenderer::new(paths.clone(), Arc::clone(&host))),
         Box::new(NetworkdRenderer::new(paths, host)),
     ];
     renderers.sort_by_key(|renderer| {
