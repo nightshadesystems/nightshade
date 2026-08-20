@@ -1,0 +1,11 @@
+eth0
+  Model:          NS-FW-1U-8X10G
+  Type:           10GBASE-SR
+  Speed/Duplex:   1G/full,10G/full,auto
+  Flowcontrol:    rx-(off,on,desired),tx-(off,on,desired)
+
+eth1
+  Model:          NS-FW-1U-8X10G
+  Type:           1000BASE-T
+  Speed/Duplex:   10M/half,10M/full,100M/half,100M/full,1G/full,auto
+  Flowcontrol:    rx-(off,on,desired),tx-(off,on,desired)

@@ -127,7 +127,7 @@ fn all_six_interface_types_are_present_with_the_common_leaves() {
     let loopback = &interfaces.children["loopback"];
     let mut leaves: Vec<&str> = loopback.children.keys().map(String::as_str).collect();
     leaves.sort();
-    assert_eq!(leaves, ["address", "description"]);
+    assert_eq!(leaves, ["address", "description", "load-interval"]);
     assert!(
         loopback.children["address"].value_spec().unwrap().accepts.is_empty(),
         "there is nothing for loopback to DHCP from"
@@ -705,7 +705,10 @@ fn children_of_drives_completion_at_every_position() {
 
     let system = schema.children_of(&p("system"));
     let names: Vec<&str> = system.iter().map(|c| c.name.as_str()).collect();
-    assert_eq!(names, ["domain-name", "host-name", "login", "name-server", "time-zone"]);
+    assert_eq!(
+        names,
+        ["domain-name", "host-name", "login", "name-server", "platform-model", "time-zone"]
+    );
     let name_server = system.iter().find(|c| c.name == "name-server").unwrap();
     assert!(name_server.multi);
     assert_eq!(name_server.value.as_deref(), Some("<ip-address>"));
@@ -726,7 +729,17 @@ fn children_of_drives_completion_at_every_position() {
         .collect();
     assert_eq!(
         inside,
-        ["address", "description", "disable", "duplex", "hw-id", "mac", "mtu", "speed"]
+        [
+            "address",
+            "description",
+            "disable",
+            "duplex",
+            "hw-id",
+            "load-interval",
+            "mac",
+            "mtu",
+            "speed"
+        ]
     );
 
     // At a leaf, what it takes.

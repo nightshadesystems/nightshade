@@ -1,0 +1,6 @@
+Port         InDiscards       OutDiscards
+eth0                  0                 2
+eth1                  0                 0
+eth2                  0                 0
+eth3                  0             41234
+eth4                  0             40997

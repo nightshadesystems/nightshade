@@ -34,7 +34,7 @@ use tokio::sync::Mutex;
 use tracing::{error, info, warn};
 
 use crate::archive::{self, Archive};
-use crate::netif;
+use crate::interfaces::Interfaces;
 use crate::confirm::{self, Marker, Pending};
 use crate::commit;
 use crate::peer::Actor;
@@ -50,6 +50,11 @@ const HISTORY: usize = 8;
 pub struct Configd {
     schema: &'static Schema,
     paths: Paths,
+    /// The interface collector, and the sampler behind it. Started once and
+    /// held for the life of the daemon: rates and link-flap counts are facts
+    /// about what happened while nobody was looking, and nothing that starts
+    /// when a command is typed can produce them.
+    interfaces: Interfaces,
     store: Store,
     archive: Archive,
     marker: Marker,
@@ -103,6 +108,7 @@ impl Configd {
             archive: Archive::new(paths.archive_dir()),
             marker: Marker::new(paths.clone()),
             renderers: nightshade_render::all(paths.clone(), host),
+            interfaces: Interfaces::start(paths.clone()),
             paths,
             state: Mutex::new(State {
                 running,
@@ -298,24 +304,34 @@ impl Configd {
             OpTarget::Version => Report::Version {
                 version: nightshade_common::VERSION.to_string(),
             },
-            OpTarget::Interfaces => {
-                let state = self.state.lock().await;
+
+            OpTarget::Interfaces { query } => {
+                // The running config is cloned and the lock released before
+                // the kernel is touched. Reading every port's link settings,
+                // module and driver counters is tens of ioctls; holding the
+                // state lock across them would stall a commit behind somebody
+                // running `show interfaces` in another session.
+                let running = self.state.lock().await.running.clone();
+                let snapshot = self.interfaces.snapshot(&query, &running);
+
+                // A name that matches nothing is a typo, and an empty table is
+                // the worst possible answer to one: it reads as "this port has
+                // no counters" rather than "there is no such port".
+                if !query.names.is_empty() && snapshot.interfaces.is_empty() {
+                    return Response::bad_request(format!(
+                        "{} is neither configured nor present on this system",
+                        query.names.join(", ")
+                    ));
+                }
+
                 Report::Interfaces {
-                    interfaces: netif::interfaces(&self.paths, &state.running),
+                    snapshot: Box::new(snapshot),
                 }
             }
-            OpTarget::Interface { name } => {
-                let state = self.state.lock().await;
-                match netif::interface(&self.paths, &state.running, &name) {
-                    Some(status) => Report::Interfaces {
-                        interfaces: vec![status],
-                    },
-                    None => {
-                        return Response::bad_request(format!(
-                            "{name} is neither configured nor present on this system"
-                        ));
-                    }
-                }
+
+            OpTarget::ClearCounters { names } => {
+                self.interfaces.clear(&names);
+                return Response::Ok;
             }
         };
         Response::Operational { report }

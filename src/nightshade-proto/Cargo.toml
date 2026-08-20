@@ -14,6 +14,7 @@ repository.workspace = true
 # runtime inside the binary that every login shell execs.
 [dependencies]
 ciborium = { workspace = true }
+nightshade-ifstate = { workspace = true }
 nightshade-schema = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }

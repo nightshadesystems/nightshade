@@ -120,6 +120,18 @@ impl Paths {
         self.at("run/nightshade/pending-confirm.json")
     }
 
+    /// Interface counters, rates and link history, as the monitor keeps them.
+    ///
+    /// Under `/run` rather than `/var/lib`, and that is the correct half of
+    /// the split: every number in it is measured against the kernel's own
+    /// counters, and those are zeroed by a reboot. Carrying a flap count
+    /// across a reboot would be carrying a count of flaps that the counters it
+    /// sits beside no longer know anything about. Across a configd restart --
+    /// which is what `/run` does survive -- it is exactly right.
+    pub fn ifstate(&self) -> PathBuf {
+        self.at("run/nightshade/ifstate.json")
+    }
+
     /// Why the box came up on defaults, if it did.
     ///
     /// Written by configd at startup and read by `ns`, which says so before
@@ -245,6 +257,7 @@ mod tests {
             p.session_file("abc123"),
             p.running(),
             p.pending_confirm(),
+            p.ifstate(),
             p.state_dir(),
             p.archive_dir(),
             p.last_applied_dir(),

@@ -19,6 +19,7 @@ path = "src/main.rs"
 
 [dependencies]
 nightshade-common = { workspace = true }
+nightshade-ifstate = { workspace = true }
 nightshade-proto = { workspace = true }
 # For completion and `?` help only. The CLI reads the schema for metadata and
 # never for judgement: no `validate_set`, no constraints, no defaults applied

@@ -956,6 +956,7 @@ version = "0.1.0"
 dependencies = [
  "nightshade-common",
  "nightshade-configd",
+ "nightshade-ifstate",
  "nightshade-proto",
  "nightshade-render",
  "nightshade-schema",
@@ -979,6 +980,8 @@ dependencies = [
  "flate2",
  "jiff",
  "nightshade-common",
+ "nightshade-ifprobe",
+ "nightshade-ifstate",
  "nightshade-proto",
  "nightshade-render",
  "nightshade-schema",
@@ -994,6 +997,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "nightshade-ifprobe"
+version = "0.1.0"
+dependencies = [
+ "nightshade-common",
+ "nightshade-ifstate",
+ "nightshade-schema",
+ "nix 0.31.3",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "nightshade-ifstate"
+version = "0.1.0"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.20",
+]
+
+[[package]]
 name = "nightshade-installer"
 version = "0.1.0"
 dependencies = [
@@ -1005,6 +1031,7 @@ name = "nightshade-proto"
 version = "0.1.0"
 dependencies = [
  "ciborium",
+ "nightshade-ifstate",
  "nightshade-schema",
  "serde",
  "thiserror 2.0.20",

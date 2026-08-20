@@ -1,0 +1,6 @@
+Name : eth0
+Administrative Speed: 10G
+Administrative Duplex: full
+Operational Speed: 10G
+Operational Duplex: full
+Media Type: 10GBASE-SR

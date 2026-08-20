@@ -40,6 +40,10 @@ const PATH_COMMANDS: &[&str] = &["set", "delete", "show", "sh", "edit"]; // not-
 pub struct Context {
     pub candidate: ConfigTree,
     pub system_interfaces: Vec<String>,
+    /// Whether the session is in operational mode. `show` means two different
+    /// commands in the two modes: a walk of the configuration in one, and the
+    /// operational command tree in the other.
+    pub operational: bool,
     /// The prefix `edit` put in front of everything typed.
     pub prefix: Path,
     pub commands: Vec<&'static str>,
@@ -76,6 +80,18 @@ pub fn candidates(
     let Some((command, path_words)) = complete.split_first() else {
         return commands(context, being_typed);
     };
+
+    // `show interfaces ...` in operational mode is a command tree of its own
+    // and not a walk of the configuration schema. Without this, `show
+    // interfaces <Tab>` would offer `ethernet` and `bonding` -- the words for
+    // configuring an interface, none of which this command takes.
+    if context.operational
+        && matches!(command.as_str(), "show" | "sh") // not-a-shell: `sh` is the alias for `show`, completed like it
+        && path_words.first().map(String::as_str) == Some("interfaces")
+    {
+        return interface_views(&path_words[1..], being_typed);
+    }
+
     if !PATH_COMMANDS.contains(&command.as_str()) {
         return Vec::new();
     }
@@ -130,6 +146,106 @@ fn instance_names(context: &Context, at: &Path, hint: &NodeInfo) -> Vec<NodeInfo
             name,
             help: hint.help.clone(),
             placeholder: false,
+            value: None,
+            multi: false,
+            default: None,
+            secret: false,
+        })
+        .collect()
+}
+
+/// The `show interfaces` command tree, for `<Tab>` and for `?`.
+///
+/// Written out here rather than derived from the parser in
+/// `nightshade-ifstate`: the parser answers "is this a valid command", and a
+/// completer has to answer "what could come next", which is a different
+/// question and one a `match` on slices cannot be asked.
+const INTERFACE_VIEWS: &[(&str, &str)] = &[
+    ("capabilities", "What the port hardware can be asked to do"),
+    ("counters", "Octet, packet, error and discard counters"),
+    ("description", "Name, state and description of every interface"),
+    ("flowcontrol", "Pause frame configuration and counters"),
+    ("mac", "MAC address, MAC state and FEC"),
+    ("negotiation", "Autonegotiation, and what both ends advertised"),
+    ("phy", "PHY state, as far as the driver reports it"),
+    ("status", "Port, VLAN, duplex, speed and media type"),
+    ("transceiver", "Optical module diagnostics and identity"),
+];
+
+/// What can follow each of them.
+const INTERFACE_SUBVIEWS: &[(&str, &[(&str, &str)])] = &[
+    (
+        "counters",
+        &[
+            ("bins", "Frame size distribution"),
+            ("discards", "Discarded frames, in and out"),
+            ("errors", "Error counters, broken down"),
+            ("queue", "Per transmit queue counters"),
+            ("rates", "Input and output rates"),
+        ],
+    ),
+    (
+        "status",
+        &[
+            ("connected", "Only ports with a link"),
+            ("disabled", "Only ports that are shut"),
+            ("errdisabled", "Only ports the system shut, and why"),
+            ("inactive", "Only ports that are up and not forwarding"),
+            ("notconnect", "Only ports with no link"),
+        ],
+    ),
+    (
+        "transceiver",
+        &[
+            ("detail", "Identity and alarm thresholds"),
+            ("eeprom", "The raw module pages"),
+            ("properties", "Administrative against operational settings"),
+        ],
+    ),
+    ("negotiation", &[("detail", "Both advertisements in full")]),
+    ("phy", &[("detail", "Every field, and the system clock")]),
+    ("mac", &[("detail", "Fault signalling and FEC counters")]),
+];
+
+fn interface_views(typed: &[String], being_typed: &str) -> Vec<NodeInfo> {
+    // An interface name may come first, and is not a view. Skipping it here is
+    // the same rule the parser uses: the first word is a name unless it is one
+    // of the view keywords.
+    let named = typed
+        .first()
+        .is_some_and(|word| !INTERFACE_VIEWS.iter().any(|(view, _)| view == word));
+    let views = if named { &typed[1..] } else { typed };
+
+    let offered: Vec<(&str, &str)> = match views {
+        // Nothing typed yet: every view, and a reminder that a name goes here.
+        [] => {
+            let mut entries = vec![(
+                "<interface>",
+                "One interface, or a range of them (eth0-3)",
+            )];
+            entries.extend(INTERFACE_VIEWS.iter().copied());
+            // The name placeholder is only offered before one has been given.
+            if named {
+                entries.remove(0);
+            }
+            entries
+        }
+        [view] => INTERFACE_SUBVIEWS
+            .iter()
+            .find(|(name, _)| name == view)
+            .map(|(_, subviews)| subviews.to_vec())
+            .unwrap_or_default(),
+        // Two words in, every branch of the tree is a leaf.
+        _ => Vec::new(),
+    };
+
+    offered
+        .into_iter()
+        .filter(|(name, _)| name.starts_with('<') || name.starts_with(being_typed))
+        .map(|(name, help)| NodeInfo {
+            name: name.to_string(),
+            help: help.to_string(),
+            placeholder: name.starts_with('<'),
             value: None,
             multi: false,
             default: None,
@@ -237,6 +353,7 @@ mod tests {
         Context {
             candidate,
             system_interfaces: vec!["eth0".into(), "eth1".into(), "lo".into()],
+            operational: false,
             prefix: Path::root(),
             commands: vec!["set", "delete", "show", "commit", "compare"],
         }
@@ -248,6 +365,65 @@ mod tests {
             .into_iter()
             .map(|entry| entry.name)
             .collect()
+    }
+
+    /// The same helper, in a session that is in operational mode.
+    fn operational_names(line: &str) -> Vec<String> {
+        let (typed, partial) = words(line);
+        let context = Context {
+            operational: true,
+            ..context(&[])
+        };
+        candidates(Schema::compiled(), &context, &typed, partial)
+            .into_iter()
+            .map(|entry| entry.name)
+            .collect()
+    }
+
+    /// The bug this exists to stop: `ethernet` and `bonding` are how an
+    /// interface is *configured*, and `show interfaces` takes neither.
+    #[test]
+    fn show_interfaces_completes_its_own_commands_and_not_the_schema() {
+        let offered = operational_names("show interfaces ");
+        assert!(offered.contains(&"description".to_string()), "{offered:?}");
+        assert!(offered.contains(&"counters".to_string()), "{offered:?}");
+        assert!(offered.contains(&"<interface>".to_string()), "{offered:?}");
+        assert!(!offered.contains(&"ethernet".to_string()), "{offered:?}");
+        assert!(!offered.contains(&"bonding".to_string()), "{offered:?}");
+    }
+
+    #[test]
+    fn the_same_words_in_configuration_mode_are_still_a_path() {
+        let offered = names("show interfaces ");
+        assert!(offered.contains(&"ethernet".to_string()), "{offered:?}");
+        assert!(!offered.contains(&"description".to_string()), "{offered:?}");
+    }
+
+    #[test]
+    fn each_branch_of_the_tree_offers_what_follows_it() {
+        assert_eq!(
+            operational_names("show interfaces counters "),
+            ["bins", "discards", "errors", "queue", "rates"]
+        );
+        assert_eq!(operational_names("show interfaces phy "), ["detail"]);
+        assert_eq!(
+            operational_names("show interfaces transceiver e"),
+            ["eeprom"]
+        );
+        // A leaf offers nothing, rather than offering the tree again.
+        assert!(operational_names("show interfaces counters errors ").is_empty());
+        assert!(operational_names("show interfaces description ").is_empty());
+    }
+
+    /// An interface name may come first, and what follows it is still the
+    /// command tree.
+    #[test]
+    fn a_named_interface_does_not_stop_the_tree_completing() {
+        let offered = operational_names("show interfaces eth0 ");
+        assert!(offered.contains(&"counters".to_string()), "{offered:?}");
+        // And the name placeholder is not offered a second time.
+        assert!(!offered.contains(&"<interface>".to_string()), "{offered:?}");
+        assert_eq!(operational_names("show interfaces eth0-3 mac "), ["detail"]);
     }
 
     #[test]
@@ -268,7 +444,7 @@ mod tests {
         assert_eq!(names("set "), ["interfaces", "system"]);
         assert_eq!(
             names("set system "),
-            ["domain-name", "host-name", "login", "name-server", "time-zone"]
+            ["domain-name", "host-name", "login", "name-server", "platform-model", "time-zone"]
         );
     }
 
@@ -304,7 +480,17 @@ mod tests {
     fn inside_an_instance_the_leaves_come_back() {
         assert_eq!(
             names("set interfaces ethernet eth0 "),
-            ["address", "description", "disable", "duplex", "hw-id", "mac", "mtu", "speed"]
+            [
+                "address",
+                "description",
+                "disable",
+                "duplex",
+                "hw-id",
+                "load-interval",
+                "mac",
+                "mtu",
+                "speed"
+            ]
         );
         assert_eq!(names("set interfaces ethernet eth0 mt"), ["mtu"]);
     }

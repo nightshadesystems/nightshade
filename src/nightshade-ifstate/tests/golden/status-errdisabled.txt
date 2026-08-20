@@ -1,0 +1,2 @@
+Port       Name                          Status       Reason
+eth6                                     errdisabled  link-flap

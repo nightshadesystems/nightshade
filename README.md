@@ -36,6 +36,8 @@ src/
   nightshade-schema/      schema, validation, the curly-brace config format
   nightshade-proto/       the framed-CBOR protocol
   nightshade-render/      config -> systemd-networkd and system settings
+  nightshade-ifstate/     the `show interfaces` model and its renderers
+  nightshade-ifprobe/     reads interface state from netlink, ethtool, sysfs
   nightshade-configd/     the configuration daemon
   nightshade-cli/         `ns`, the operator CLI
   nightshade-installer/   the installer
@@ -395,6 +397,41 @@ keep it that way.
 
 Non-interactively: `ns -c "show interfaces" --json`, or `ns -f batch-file`.
 Exit codes are 0 for success, 1 for a command error, 2 for a configuration one.
+
+### Looking at the interfaces
+
+`show interfaces` is the operational command with the most in it, and its
+output is Arista EOS's — the same columns, the same field names, the same
+section order — so that eyes trained on one appliance read this one without
+relearning. Two things are deliberately not EOS's: interfaces are called what
+Linux calls them (`eth0`, never `Ethernet1`), and MAC addresses are written
+`2c:dd:e9:12:00:a1` rather than in dotted quads.
+
+```
+show interfaces [<name>]                 the long form, per interface
+show interfaces description              name, state and description
+show interfaces status [<filter>]        port, speed, duplex, media
+show interfaces counters [errors|discards|rates|queue|bins]
+show interfaces transceiver [detail|properties|eeprom]
+show interfaces capabilities | flowcontrol
+show interfaces negotiation [detail]
+show interfaces phy [detail]
+show interfaces mac [detail]
+clear counters [<name>]
+```
+
+Every one of them takes an interface or a range of them first —
+`show interfaces eth0-3 counters errors` — and every one of them accepts
+`| display json`, which emits the same data model the text is rendered from
+rather than a second implementation of the command.
+
+Counters, rates, link-flap counts and uptimes come from a sampler inside
+configd rather than from reading the kernel when the command is typed: a rate
+is two counters and the time between them, and a flap that happened while
+nobody was looking still happened. The layouts are held to
+[byte-exact fixtures](src/nightshade-ifstate/tests/golden/), and the
+specification they implement is
+[docs/specs/show-interfaces.md](docs/specs/show-interfaces.md).
 
 ---
 

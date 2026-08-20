@@ -13,6 +13,8 @@
 //! makes adding variants safe, and what will make an API frontend additive
 //! rather than a protocol break.
 
+use nightshade_ifstate::query::Query as InterfaceQuery;
+use nightshade_ifstate::Snapshot;
 use nightshade_schema::config::ConfigTree;
 use nightshade_schema::diff::Change;
 use nightshade_schema::path::Path;
@@ -103,34 +105,24 @@ pub enum Request {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OpTarget {
     Version,
-    Interfaces,
-    Interface { name: String },
+    /// One `show interfaces ...`, already parsed. The query travels rather
+    /// than the words, so the daemon knows which of the expensive reads the
+    /// answer needs -- an EEPROM page costs two ioctls per module and is not
+    /// collected for `show interfaces description`.
+    Interfaces { query: InterfaceQuery },
+    /// Reset the counter baselines. Empty names means every interface.
+    ClearCounters { names: Vec<String> },
 }
 
 /// What a live-state request came back with.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Report {
     Version { version: String },
-    Interfaces { interfaces: Vec<InterfaceStatus> },
-}
-
-/// One interface, as the kernel and the configuration together describe it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct InterfaceStatus {
-    pub name: String,
-    /// The configured type, or `unconfigured` for a device the kernel has and
-    /// the configuration does not mention.
-    pub kind: String,
-    /// `up`, `down`, `unknown` -- from the kernel, not from the config.
-    pub state: String,
-    pub mac: Option<String>,
-    pub mtu: Option<u32>,
-    /// Addresses from the running configuration.
-    pub addresses: Vec<String>,
-    pub description: Option<String>,
-    /// Whether the kernel has this device at all. A configured interface that
-    /// is missing is the single most useful thing this command can show.
-    pub present: bool,
+    /// Boxed: an interface carries an EEPROM page and a snapshot carries
+    /// several interfaces, so this variant is two orders of magnitude larger
+    /// than the others and would otherwise set the size of every `Report` on
+    /// the stack.
+    Interfaces { snapshot: Box<Snapshot> },
 }
 
 /// Where a `Load` gets its configuration.
@@ -162,7 +154,7 @@ pub struct RevisionInfo {
     pub changes: Vec<Change>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum Response {
     Ok,
     Session { id: SessionId },

@@ -1,0 +1,6 @@
+Port    MAC Address          State
+eth0    2c:dd:e9:12:00:a1    linkUp
+eth1    2c:dd:e9:12:00:a2    linkUp
+eth2    2c:dd:e9:12:00:a3    phyOff
+eth3    2c:dd:e9:12:00:a4    linkUp
+eth4    2c:dd:e9:12:00:a5    linkUp

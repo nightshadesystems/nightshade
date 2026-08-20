@@ -27,6 +27,17 @@ nodes:
         type: ip-address
         help: "Domain name server address"
 
+      # What `show interfaces capabilities` prints as the model of the port.
+      #
+      # Read from DMI when this is not set, which is right on an appliance
+      # whose board says what it is. It is configurable because a whitebox
+      # rarely does -- a board that reports `To be filled by O.E.M.` is a
+      # board an operator has to name themselves.
+      platform-model:
+        kind: leaf
+        type: string
+        help: "Hardware model this system reports; read from DMI when unset"
+
       time-zone:
         kind: leaf
         type: time-zone

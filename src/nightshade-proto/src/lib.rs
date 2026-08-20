@@ -36,6 +36,6 @@ pub mod message;
 
 pub use frame::{FrameError, MAX_BODY};
 pub use message::{
-    FailureKind, InterfaceStatus, LoadSource, OpTarget, Report, Request, Response, RevisionInfo,
+    FailureKind, LoadSource, OpTarget, Report, Request, Response, RevisionInfo,
     SessionId,
 };

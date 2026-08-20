@@ -1,0 +1,7 @@
+Port       Name                          Status       Vlan     Duplex Speed  Type            Flags Encapsulation
+eth0       WAN uplink to ISP - Circui    connected    routed   full   10G    10GBASE-SR
+eth1       LAN trunk to qs-hq-access1    connected    trunk    full   1G     1000BASE-T
+eth2                                     disabled     1        full   unconf 1000BASE-T
+eth3       LAG member bond0              connected    in bond0 full   10G    10GBASE-CR
+eth4       LAG member bond0              connected    in bond0 full   10G    10GBASE-CR
+bond0      LAG to qs-hq-core             connected    trunk    full   20G    N/A

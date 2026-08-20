@@ -1,0 +1,36 @@
+[package]
+name = "nightshade-ifprobe"
+description = "Reads interface state from netlink, ethtool and sysfs for configd"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# configd only. Everything here is a syscall against the running kernel, and
+# the CLI has no business making any of them -- it asks configd, like it does
+# for everything else, so there is one answer to what an interface looks like.
+#
+# `nix` for its libc re-export: the netlink socket and the ethtool ioctls are
+# raw enough that nix's own wrappers would not help, but pulling libc in
+# through the crate the workspace already audits is better than adding a second
+# path to the same code.
+[dependencies]
+nightshade-common = { workspace = true }
+nightshade-ifstate = { workspace = true }
+nightshade-schema = { workspace = true }
+
+nix = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[features]
+# Tests that need a real kernel: a veth pair, a netlink dump against it, and
+# the counters moving. Off by default because `cargo test --workspace` runs on
+# a developer's laptop and on CI, and neither can create a network namespace.
+#
+#   sudo -E cargo test -p nightshade-ifprobe --features kernel-tests
+kernel-tests = []

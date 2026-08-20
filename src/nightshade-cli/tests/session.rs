@@ -230,7 +230,7 @@ fn completion_works_at_every_position() {
     assert_eq!(offered(&cli, "set "), ["interfaces", "system"]);
     assert_eq!(
         offered(&cli, "set system "),
-        ["domain-name", "host-name", "login", "name-server", "time-zone"]
+        ["domain-name", "host-name", "login", "name-server", "platform-model", "time-zone"]
     );
 
     // An interface that is configured is offered by name.
@@ -623,4 +623,127 @@ fn two_clients_have_their_own_candidates() {
     // B is now behind, and is told so rather than silently reverting A.
     run(&mut b, "set system time-zone UTC");
     assert_eq!(run(&mut b, "commit"), Outcome::ConfigError);
+}
+
+// ---------------------------------------------------------------------------
+// show interfaces
+// ---------------------------------------------------------------------------
+
+/// Every command in the family, end to end, against a real configd on a real
+/// kernel.
+///
+/// The output is not asserted on -- what the box has plugged into it is not
+/// this test's business, and the shape of every command's output is held to a
+/// byte-exact fixture in `nightshade-ifstate`. What is asserted is that every
+/// one of them is understood, is answered, and comes back clean: no command
+/// that parses here may fail there, and none of them may produce a line with a
+/// trailing space or no final newline.
+#[test]
+fn every_show_interfaces_command_is_answered() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+
+    for line in [
+        "show interfaces",
+        "show interfaces description",
+        "show interfaces status",
+        "show interfaces status connected",
+        "show interfaces status notconnect",
+        "show interfaces status errdisabled",
+        "show interfaces status inactive",
+        "show interfaces counters",
+        "show interfaces counters errors",
+        "show interfaces counters discards",
+        "show interfaces counters rates",
+        "show interfaces counters queue",
+        "show interfaces counters bins",
+        "show interfaces transceiver",
+        "show interfaces transceiver detail",
+        "show interfaces transceiver properties",
+        "show interfaces transceiver eeprom",
+        "show interfaces capabilities",
+        "show interfaces flowcontrol",
+        "show interfaces negotiation",
+        "show interfaces negotiation detail",
+        "show interfaces phy",
+        "show interfaces phy detail",
+        "show interfaces mac",
+        "show interfaces mac detail",
+        // A name and a range in front of a view, which is the other half of
+        // the grammar.
+        "show interfaces lo",
+        "show interfaces lo counters",
+        "show interfaces eth0-3 status",
+        // A comma list has to be quoted: a comma is not a character the
+        // config tokeniser lets through bare, and the tokeniser is the same
+        // one that reads `config.boot`. Adding a character to it for the sake
+        // of one operational command would be changing the config language.
+        "show interfaces \"lo,eth0\" description",
+        // And the modifiers, over the same data.
+        "show interfaces | display json",
+        "show interfaces status | count",
+        "show interfaces description | match lo",
+    ] {
+        assert_eq!(run(&mut cli, line), Outcome::Ok, "{line}");
+    }
+}
+
+/// A command that is not in the tree is a command error, and says which word
+/// was wrong rather than printing an empty table.
+#[test]
+fn a_show_interfaces_command_that_does_not_exist_is_refused() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+
+    for line in [
+        "show interfaces counters nonsense",
+        "show interfaces status nonsense",
+        "show interfaces nonsense",
+        "show interfaces phy detail extra",
+        // A range that counts backwards, and one that would name four
+        // billion interfaces.
+        "show interfaces eth3-0 status",
+        "show interfaces eth0-4294967295",
+    ] {
+        assert_eq!(run(&mut cli, line), Outcome::CommandError, "{line}");
+    }
+
+    // And the session is still usable afterwards.
+    assert_eq!(run(&mut cli, "show interfaces"), Outcome::Ok);
+}
+
+/// `clear counters` moves the baseline. It cannot be observed from here
+/// without traffic, so what is checked is that it is accepted, that it takes
+/// an interface, and that a bad one is refused.
+#[test]
+fn clear_counters_is_accepted_and_checked() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+
+    assert_eq!(run(&mut cli, "clear counters"), Outcome::Ok);
+    assert_eq!(run(&mut cli, "clear counters lo"), Outcome::Ok);
+    assert_eq!(run(&mut cli, "clear counters eth0-3"), Outcome::Ok);
+    assert_eq!(run(&mut cli, "clear counters eth3-0"), Outcome::CommandError);
+    assert_eq!(run(&mut cli, "clear"), Outcome::CommandError);
+    assert_eq!(run(&mut cli, "clear nonsense"), Outcome::CommandError);
+}
+
+/// A configured interface the kernel does not have is the single most useful
+/// thing this command says, and it must survive going over the socket.
+#[test]
+fn an_interface_that_is_configured_and_absent_is_reported_as_such() {
+    let harness = Harness::start();
+    let mut cli = harness.cli();
+
+    run(&mut cli, "configure");
+    // A name no kernel will have: the schema accepts it, the box does not.
+    assert_eq!(
+        run(&mut cli, "set interfaces ethernet eth99 description absent-on-purpose"),
+        Outcome::Ok
+    );
+    assert_eq!(run(&mut cli, "commit"), Outcome::Ok);
+    assert_eq!(run(&mut cli, "exit"), Outcome::Ok);
+
+    assert_eq!(run(&mut cli, "show interfaces eth99"), Outcome::Ok);
+    assert_eq!(run(&mut cli, "show interfaces description"), Outcome::Ok);
 }

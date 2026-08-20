@@ -1,0 +1,9 @@
+Port      TxQ    Counter/pkts        Counter/bytes      Dropped/pkts     Dropped/bytes
+eth0      UC0        84123441       81234981234412                 0                 0
+eth0      UC1               0                    0                 0                 0
+eth0      UC2               0                    0                 0                 0
+eth0      UC3        12341123        9812734412334                 0                 0
+eth0      UC4               0                    0                 0                 0
+eth0      UC5               0                    0                 0                 0
+eth0      UC6          441233           4412334981                 0                 0
+eth0      UC7         8812344          88123449812                 2              3028

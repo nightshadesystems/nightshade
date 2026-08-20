@@ -7,12 +7,14 @@
 
 use std::io::IsTerminal;
 
-use nightshade_proto::message::{InterfaceStatus, RevisionInfo};
+use nightshade_ifstate::Snapshot;
+use nightshade_ifstate::query::View;
+use nightshade_proto::message::RevisionInfo;
 use nightshade_schema::config::{Body, ConfigTree, Node};
 use nightshade_schema::diff::{Change, Op};
 use nightshade_schema::model::{Location, Schema};
 use nightshade_schema::path::Path;
-use nightshade_schema::{curly, lex};
+use nightshade_schema::curly;
 
 /// What was masked in place of a secret.
 pub const MASK: &str = "****";
@@ -31,9 +33,14 @@ pub enum Output {
     },
     Changes(Vec<Change>),
     Revisions(Vec<RevisionInfo>),
+    /// One `show interfaces ...`, and which of them it was.
+    ///
+    /// The snapshot is the same value the text renderer and the JSON
+    /// serialiser both read, which is what makes `| display json` a modifier
+    /// rather than a second implementation of the command.
     Interfaces {
-        interfaces: Vec<InterfaceStatus>,
-        detail: bool,
+        snapshot: Box<Snapshot>,
+        view: View,
     },
 }
 
@@ -56,12 +63,8 @@ impl Output {
                 .map(|change| format!("{}\n", colour_change(change, style)))
                 .collect(),
             Output::Revisions(revisions) => revisions_table(revisions),
-            Output::Interfaces { interfaces, detail } => {
-                if *detail {
-                    interfaces_detail(interfaces)
-                } else {
-                    interfaces_table(interfaces)
-                }
+            Output::Interfaces { snapshot, view } => {
+                nightshade_ifstate::render(snapshot, view)
             }
         }
     }
@@ -74,8 +77,8 @@ impl Output {
             Output::ConfigDiff { candidate, .. } => config_json(&prepare(candidate, style)),
             Output::Changes(changes) => serde_json::to_value(changes).unwrap_or_default(),
             Output::Revisions(revisions) => serde_json::to_value(revisions).unwrap_or_default(),
-            Output::Interfaces { interfaces, .. } => {
-                serde_json::to_value(interfaces).unwrap_or_default()
+            Output::Interfaces { snapshot, .. } => {
+                serde_json::to_value(snapshot).unwrap_or_default()
             }
         };
         let mut text = serde_json::to_string_pretty(&value).unwrap_or_else(|_| "null".into());
@@ -296,71 +299,6 @@ fn table(headers: &[&str], rows: &[Vec<String>]) -> String {
     );
     for row in rows {
         line(&mut out, row);
-    }
-    out
-}
-
-fn interfaces_table(interfaces: &[InterfaceStatus]) -> String {
-    let rows: Vec<Vec<String>> = interfaces
-        .iter()
-        .map(|interface| {
-            vec![
-                interface.name.clone(),
-                interface.kind.clone(),
-                if interface.present {
-                    interface.state.clone()
-                } else {
-                    // The single most useful thing this table says.
-                    "not present".to_string()
-                },
-                if interface.addresses.is_empty() {
-                    "-".to_string()
-                } else {
-                    interface.addresses.join(", ")
-                },
-                interface.description.clone().unwrap_or_else(|| "-".into()),
-            ]
-        })
-        .collect();
-    table(
-        &["interface", "type", "state", "address", "description"],
-        &rows,
-    )
-}
-
-fn interfaces_detail(interfaces: &[InterfaceStatus]) -> String {
-    let mut out = String::new();
-    for interface in interfaces {
-        out.push_str(&format!("{}\n", interface.name));
-        let mut field = |name: &str, value: String| {
-            out.push_str(&format!("    {name:<14}{value}\n"));
-        };
-        field("type", interface.kind.clone());
-        field(
-            "state",
-            if interface.present {
-                interface.state.clone()
-            } else {
-                "not present on this system".to_string()
-            },
-        );
-        if let Some(mac) = &interface.mac {
-            field("hardware", mac.clone());
-        }
-        if let Some(mtu) = interface.mtu {
-            field("mtu", mtu.to_string());
-        }
-        if let Some(description) = &interface.description {
-            field("description", lex::quote(description));
-        }
-        if interface.addresses.is_empty() {
-            field("address", "none configured".to_string());
-        } else {
-            for address in &interface.addresses {
-                field("address", address.clone());
-            }
-        }
-        out.push('\n');
     }
     out
 }
@@ -590,37 +528,45 @@ mod tests {
     }
 
     #[test]
-    fn a_table_lines_up_and_marks_what_is_missing() {
-        let interfaces = vec![
-            InterfaceStatus {
-                name: "eth0".into(),
-                kind: "ethernet".into(),
-                state: "up".into(),
-                mac: Some("02:00:5e:10:00:01".into()),
-                mtu: Some(1500),
-                addresses: vec!["10.0.0.1/24".into()],
-                description: Some("the uplink".into()),
-                present: true,
-            },
-            InterfaceStatus {
-                name: "eth9".into(),
-                kind: "ethernet".into(),
-                state: "unknown".into(),
-                mac: None,
-                mtu: None,
-                addresses: vec![],
-                description: None,
-                present: false,
-            },
-        ];
-        let text = Output::Interfaces {
-            interfaces,
-            detail: false,
-        }
-        .render(&style());
-        assert!(text.contains("interface  type"), "{text}");
-        assert!(text.contains("not present"), "{text}");
-        assert!(text.contains("10.0.0.1/24"), "{text}");
+    fn an_interface_report_renders_as_text_and_as_the_same_data_in_json() {
+        use nightshade_ifstate::model::{Address, Interface, Kind, Oper};
+
+        let mut eth0 = Interface::new("eth0", Kind::Ethernet);
+        eth0.admin_up = true;
+        eth0.oper = Oper::Up;
+        eth0.link = nightshade_ifstate::model::Link::Connected;
+        eth0.mac = Some("02:00:5e:10:00:01".into());
+        eth0.mtu = Some(1500);
+        eth0.description = Some("the uplink".into());
+        eth0.addresses = vec![Address {
+            prefix: "10.0.0.1/24".into(),
+            broadcast: None,
+        }];
+
+        // The most useful row this command has: configured, and not there.
+        let mut eth9 = Interface::new("eth9", Kind::Ethernet);
+        eth9.present = false;
+        eth9.oper = Oper::NotPresent;
+
+        let output = Output::Interfaces {
+            snapshot: Box::new(Snapshot {
+                interfaces: vec![eth0, eth9],
+                ..Snapshot::default()
+            }),
+            view: View::Detail,
+        };
+
+        let text = output.render(&style());
+        assert!(text.contains("eth0 is up, line protocol is up (connected)"), "{text}");
+        assert!(text.contains("Internet address is 10.0.0.1/24"), "{text}");
+        assert!(text.contains("line protocol is notpresent"), "{text}");
+
+        // The same value, structured. Not a second rendering of the text.
+        let json: serde_json::Value =
+            serde_json::from_str(&output.render_json(&style())).expect("valid JSON");
+        assert_eq!(json["interfaces"][0]["name"], "eth0");
+        assert_eq!(json["interfaces"][0]["mtu"], 1500);
+        assert_eq!(json["interfaces"][1]["present"], false);
     }
 
     #[test]

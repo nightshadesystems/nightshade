@@ -1,0 +1,24 @@
+[package]
+name = "nightshade-ifstate"
+description = "The interface-state model shown by `show interfaces`, and the renderers for it"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+# Model and rendering only. Nothing here reads a socket, an ioctl or /sys:
+# collection lives in nightshade-ifprobe, which only configd depends on.
+#
+# The split is not tidiness. `ns` is a login shell and links this crate to
+# render what configd sends back; a crate that also knew how to talk netlink
+# would put that code, and its dependency tree, inside every login shell on the
+# box. Cargo unifies features across a workspace build, so a `collect` feature
+# would not have prevented it -- only a second crate does.
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }

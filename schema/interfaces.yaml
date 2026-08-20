@@ -39,6 +39,17 @@ templates:
       kind: flag
       help: "Administratively disable this interface"
 
+    # What `show interfaces` averages its rate lines over, and what the
+    # `5 minutes input rate` in them is naming. Per interface because the
+    # useful window is not the same for a WAN circuit somebody is billed on by
+    # the 95th percentile and a LAN trunk somebody is watching flap.
+    load-interval:
+      kind: leaf
+      type: uint
+      range: {min: 5, max: 600}
+      default: 300
+      help: "Seconds the input and output rates are averaged over"
+
 nodes:
   interfaces:
     kind: container

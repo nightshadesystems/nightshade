@@ -26,6 +26,7 @@
 use std::borrow::Cow;
 use std::sync::{Arc, Mutex};
 
+use nightshade_ifstate::query as ifquery;
 use nightshade_proto::message::{
     FailureKind, LoadSource, OpTarget, Report, Request, Response, SessionId,
 };
@@ -85,7 +86,8 @@ pub enum Mode {
 /// and listing both spellings makes `<Tab>` ambiguous where it currently
 /// fills the rest of the word in.
 const OPERATIONAL_COMMANDS: &[&str] = &[
-    "configure", "exit", "help", "logout", "ping", "quit", "shell", "show", "traceroute",
+    "clear", "configure", "exit", "help", "logout", "ping", "quit", "shell", "show",
+    "traceroute",
 ];
 
 const CONFIGURATION_COMMANDS: &[&str] = &[
@@ -168,6 +170,7 @@ impl Cli {
             context.candidate = candidate;
             context.prefix = self.prefix.clone();
             context.system_interfaces = output::system_interfaces();
+            context.operational = self.mode == Mode::Operational;
             context.commands = match self.mode {
                 Mode::Operational => OPERATIONAL_COMMANDS.to_vec(),
                 Mode::Configuration => CONFIGURATION_COMMANDS.to_vec(),
@@ -268,6 +271,7 @@ impl Cli {
                     other => Ok(self.unexpected(other)),
                 }
             }
+            "clear" => self.clear(rest),
             "shell" => self.shell(),
             "ping" => self.trace_or_ping("ping", rest),
             "traceroute" => self.trace_or_ping("traceroute", rest),
@@ -301,34 +305,26 @@ impl Cli {
                 other => Ok(self.unexpected(other)),
             },
 
-            // `show interfaces`, `show interfaces detail`,
-            // `show interfaces <type> <name> [detail]`.
+            // The whole `show interfaces` family. The words are parsed into
+            // a query here and the query is what crosses the socket, so the
+            // daemon knows which of the expensive reads the answer needs.
             ["interfaces", tail @ ..] => {
-                let (tail, detail) = match tail.split_last() {
-                    Some((&"detail", head)) => (head, true),
-                    _ => (tail, false),
-                };
-                let target = match tail {
-                    [] => OpTarget::Interfaces,
-                    [_kind, name] => OpTarget::Interface {
-                        name: (*name).to_string(),
-                    },
-                    [name] => OpTarget::Interface {
-                        name: (*name).to_string(),
-                    },
-                    _ => {
-                        return Ok((
-                            Output::Text(
-                                "show interfaces [<type> <name>] [detail]\n".into(),
-                            ),
-                            Outcome::CommandError,
-                        ));
+                let query = match ifquery::parse(tail) {
+                    Ok(query) => query,
+                    Err(e) => {
+                        return Ok((Output::Text(format!("{e}\n")), Outcome::CommandError));
                     }
                 };
-                match self.client.call(Request::OpShow { target })? {
+                let view = query.view.clone();
+                match self.client.call(Request::OpShow {
+                    target: OpTarget::Interfaces { query },
+                })? {
                     Response::Operational {
-                        report: Report::Interfaces { interfaces },
-                    } => Ok((Output::Interfaces { interfaces, detail }, Outcome::Ok)),
+                        report: Report::Interfaces { snapshot },
+                    } => Ok((Output::Interfaces { snapshot, view }, Outcome::Ok)),
+                    Response::Failed { kind, message } => {
+                        Ok((Output::Text(format!("{message}\n")), Outcome::of(kind)))
+                    }
                     other => Ok(self.unexpected(other)),
                 }
             }
@@ -339,6 +335,39 @@ impl Cli {
                 ),
                 Outcome::CommandError,
             )),
+        }
+    }
+
+    /// `clear counters [<interface>]` -- move the baseline everything is
+    /// measured from.
+    ///
+    /// The counters are the kernel's and cannot be zeroed, so this records
+    /// what they are now and configd subtracts it from here on. That is what
+    /// `Last clearing of "show interface" counters` is dating.
+    fn clear(&mut self, rest: &[String]) -> Result<(Output, Outcome), ClientError> {
+        let words: Vec<&str> = rest.iter().map(String::as_str).collect();
+        let names = match words.as_slice() {
+            ["counters"] => Vec::new(),
+            ["counters", spec] => match ifquery::expand(spec) {
+                Ok(names) => names,
+                Err(e) => return Ok((Output::Text(format!("{e}\n")), Outcome::CommandError)),
+            },
+            _ => {
+                return Ok((
+                    Output::Text("clear counters [<interface>]\n".into()),
+                    Outcome::CommandError,
+                ));
+            }
+        };
+
+        match self.client.call(Request::OpShow {
+            target: OpTarget::ClearCounters { names },
+        })? {
+            Response::Ok => Ok((Output::Nothing, Outcome::Ok)),
+            Response::Failed { kind, message } => {
+                Ok((Output::Text(format!("{message}\n")), Outcome::of(kind)))
+            }
+            other => Ok(self.unexpected(other)),
         }
     }
 

@@ -1,0 +1,9 @@
+Interface                      Status         Protocol           Description
+eth0                           up             up                 WAN uplink to ISP - Circuit ID 4471-A
+eth1                           up             up                 LAN trunk to qs-hq-access1
+eth2                           admin down     down
+eth3                           up             up                 LAG member bond0
+eth4                           up             up                 LAG member bond0
+bond0                          up             up                 LAG to qs-hq-core
+lo                             up             up                 Router-ID
+vlan10                         up             up                 LAN-USERS
